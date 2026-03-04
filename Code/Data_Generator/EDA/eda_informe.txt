@@ -1,0 +1,194 @@
+========================================================================
+INFORME EDA — DATASET SINTÉTICO OCR — ESPAÑOL
+========================================================================
+
+1. RESUMEN GENERAL
+------------------------------------------------------------------------
+   Total imágenes          :     19,998
+   Total fuentes           :          6
+   Imágenes con error      :          0
+   Imágenes degeneradas    :          0
+   Total palabras          :    148,265
+   Palabras únicas         :     15,131
+   Total caracteres        :    771,513
+   Chars únicos en dataset :        100
+   CV frecuencias de chars :     203.1%
+
+   Nota sobre el CV de frecuencias:
+   Un CV elevado es esperable en lenguaje natural (ley de Zipf).
+   La métrica relevante para OCR es la cobertura mínima por carácter
+   (sección 5), no el CV global.
+
+2. DIMENSIONES DE IMAGEN
+------------------------------------------------------------------------
+   Ancho — media        :   1657.7 px
+   Ancho — mediana      :   1575.0 px
+   Ancho — min / max    :   232 / 3654 px
+   Ancho — std (CV)     :    645.0 px  (CV=38.9%)
+   Alto  — media        :    120.8 px
+   Alto  — mediana      :    121.0 px
+   Alto  — min / max    :    72 / 142 px
+   Aspect ratio — media :    13.73
+   Aspect ratio — P50   :    12.99
+   Aspect ratio — P95   :    23.71
+   Aspect ratio — max   :    37.40
+
+   Alturas por fuente:
+   CourierPrime-Regular                          media=116.7px  rango=[92,127]
+   CrimsonPro-Regular                            media=116.6px  rango=[91,124]
+   CutiveMono-Regular                            media=111.3px  rango=[90,124]
+   EBGaramond-Regular                            media=123.7px  rango=[86,135]
+   LibreBaskerville-Regular                      media=131.9px  rango=[72,142]
+   SpecialElite-Regular                          media=124.3px  rango=[101,137]
+
+3. LONGITUDES DE ETIQUETA
+------------------------------------------------------------------------
+   Media        : 38.6 chars
+   Mediana      : 37.0 chars
+   Min / Max    : 9 / 74 chars
+   Std          : 13.9 chars
+   P5/P25/P75/P95: 19 / 28 / 49 / 64
+
+   Restricción CTC (stride=4):
+   Ancho mínimo requerido para la etiqueta más larga (74 chars): 296 px
+   Imágenes que violan la restricción: 0 de 19,998
+
+4. DISTRIBUCIÓN POR FUENTE
+------------------------------------------------------------------------
+   FUENTE                                           IMGS       %   L.MEDIA    L.STD
+   ─────────────────────────────────────────────  ──────  ──────  ────────  ───────
+   CourierPrime-Regular                            3,333   16.7%     38.9    13.8
+   CrimsonPro-Regular                              3,333   16.7%     38.4    14.0
+   CutiveMono-Regular                              3,333   16.7%     38.6    13.9
+   EBGaramond-Regular                              3,333   16.7%     38.6    14.0
+   LibreBaskerville-Regular                        3,333   16.7%     38.7    13.9
+   SpecialElite-Regular                            3,333   16.7%     38.4    14.0
+
+5. COBERTURA DE CARACTERES
+------------------------------------------------------------------------
+   CHAR      OBJETIVO%    REAL%    DESV.     APARIC.  ESTADO
+   ──────── ──────────  ───────  ───────  ──────────  ────────────
+   'a'           4.32%    7.41%   +3.09%      57,136  ABUNDANTE
+   'e'           4.87%    6.83%   +1.96%      52,690  ABUNDANTE
+   's'           2.88%    4.41%   +1.53%      34,039  ABUNDANTE
+   'o'           3.18%    4.27%   +1.09%      32,907  ABUNDANTE
+   'r'           2.50%    4.13%   +1.63%      31,845  ABUNDANTE
+   'n'           2.41%    3.98%   +1.57%      30,728  ABUNDANTE
+   'i'           2.24%    3.79%   +1.54%      29,215  OK
+   'l'           2.12%    2.56%   +0.44%      19,740  OK
+   't'           1.65%    2.38%   +0.73%      18,399  OK
+   'u'           1.31%    2.19%   +0.88%      16,934  OK
+   'c'           1.23%    2.08%   +0.86%      16,077  OK
+   'd'           1.78%    1.92%   +0.14%      14,786  OK
+   'm'           1.06%    1.68%   +0.62%      12,964  OK
+   'E'           2.12%    1.49%   -0.62%      11,512  OK
+   'A'           1.91%    1.32%   -0.58%      10,188  OK
+   'g'           1.06%    1.04%   -0.02%       8,049  OK
+   'R'           1.06%    0.97%   -0.09%       7,473  OK
+   'O'           1.48%    0.97%   -0.51%       7,460  OK
+   'b'           1.06%    0.96%   -0.10%       7,394  OK
+   'p'           0.97%    0.93%   -0.04%       7,204  OK
+   'S'           1.27%    0.79%   -0.48%       6,104  OK
+   '.'           1.27%    0.79%   -0.48%       6,074  OK
+   '—'           1.27%    0.79%   -0.48%       6,071  OK
+   'I'           1.06%    0.78%   -0.28%       5,991  OK
+   'N'           1.06%    0.65%   -0.41%       5,015  OK
+   'C'           0.85%    0.61%   -0.23%       4,730  OK
+   'L'           1.06%    0.61%   -0.45%       4,723  OK
+   'v'           1.06%    0.61%   -0.45%       4,721  OK
+   'á'           1.06%    0.61%   -0.45%       4,721  OK
+   'z'           1.06%    0.61%   -0.45%       4,720  OK
+   'f'           1.06%    0.61%   -0.45%       4,720  OK
+   'ó'           1.06%    0.61%   -0.45%       4,720  OK
+   'í'           1.06%    0.61%   -0.45%       4,718  OK
+   'é'           1.06%    0.61%   -0.45%       4,717  OK
+   'y'           1.06%    0.61%   -0.45%       4,716  OK
+   'h'           1.06%    0.61%   -0.45%       4,714  OK
+   ','           1.06%    0.61%   -0.45%       4,713  OK
+   'q'           1.06%    0.61%   -0.45%       4,711  OK
+   'ú'           1.06%    0.61%   -0.45%       4,711  OK
+   'D'           0.85%    0.47%   -0.38%       3,627  OK
+   'P'           0.85%    0.44%   -0.41%       3,362  OK
+   'M'           0.85%    0.44%   -0.41%       3,359  OK
+   'ñ'           0.85%    0.44%   -0.41%       3,358  OK
+   'T'           0.85%    0.44%   -0.41%       3,357  OK
+   'k'           0.85%    0.43%   -0.41%       3,355  OK
+   'j'           0.85%    0.43%   -0.41%       3,355  OK
+   '¿'           0.85%    0.43%   -0.41%       3,354  OK
+   'x'           0.85%    0.43%   -0.41%       3,353  OK
+   '-'           0.85%    0.43%   -0.41%       3,353  OK
+   '»'           0.85%    0.43%   -0.41%       3,353  OK
+   'w'           0.85%    0.43%   -0.41%       3,353  OK
+   '«'           0.85%    0.43%   -0.41%       3,352  OK
+   '¡'           0.85%    0.43%   -0.41%       3,350  OK
+   'G'           0.64%    0.29%   -0.35%       2,205  OK
+   'B'           0.64%    0.26%   -0.37%       2,022  OK
+   'U'           0.64%    0.26%   -0.38%       1,998  OK
+   'V'           0.64%    0.26%   -0.38%       1,997  OK
+   'Ó'           0.64%    0.26%   -0.38%       1,995  OK
+   '0'           0.64%    0.26%   -0.38%       1,995  OK
+   'Í'           0.64%    0.26%   -0.38%       1,994  OK
+   '2'           0.64%    0.26%   -0.38%       1,994  OK
+   'Z'           0.64%    0.26%   -0.38%       1,993  OK
+   '7'           0.64%    0.26%   -0.38%       1,993  OK
+   '5'           0.64%    0.26%   -0.38%       1,993  OK
+   '6'           0.64%    0.26%   -0.38%       1,993  OK
+   'Y'           0.64%    0.26%   -0.38%       1,993  OK
+   'H'           0.64%    0.26%   -0.38%       1,993  OK
+   '!'           0.64%    0.26%   -0.38%       1,993  OK
+   'ü'           0.64%    0.26%   -0.38%       1,992  OK
+   'Q'           0.64%    0.26%   -0.38%       1,992  OK
+   'F'           0.64%    0.26%   -0.38%       1,992  OK
+   'Ú'           0.64%    0.26%   -0.38%       1,992  OK
+   'É'           0.64%    0.26%   -0.38%       1,992  OK
+   ';'           0.64%    0.26%   -0.38%       1,992  OK
+   'Á'           0.64%    0.26%   -0.38%       1,991  OK
+   'J'           0.64%    0.26%   -0.38%       1,991  OK
+   '4'           0.64%    0.26%   -0.38%       1,991  OK
+   '&'           0.64%    0.26%   -0.38%       1,991  OK
+   '3'           0.64%    0.26%   -0.38%       1,991  OK
+   '%'           0.64%    0.26%   -0.38%       1,990  OK
+   'Ñ'           0.64%    0.26%   -0.38%       1,990  OK
+   '8'           0.64%    0.26%   -0.38%       1,990  OK
+   ':'           0.64%    0.26%   -0.38%       1,990  OK
+   '$'           0.64%    0.26%   -0.38%       1,990  OK
+   '?'           0.64%    0.26%   -0.38%       1,990  OK
+   '1'           0.64%    0.26%   -0.38%       1,989  OK
+   '9'           0.64%    0.26%   -0.38%       1,989  OK
+   'X'           0.42%    0.08%   -0.34%         652  OK
+   'Ü'           0.42%    0.08%   -0.34%         635  OK
+   'K'           0.42%    0.08%   -0.34%         633  OK
+   '''           0.42%    0.08%   -0.34%         633  OK
+   'W'           0.42%    0.08%   -0.34%         632  OK
+   '*'           0.42%    0.08%   -0.34%         632  OK
+   '('           0.42%    0.08%   -0.34%         632  OK
+   ')'           0.42%    0.08%   -0.34%         630  OK
+   '"'           0.42%    0.08%   -0.34%         630  OK
+   '#'           0.34%    0.01%   -0.33%          91  INSUFICIENTE
+   '['           0.34%    0.01%   -0.33%          90  INSUFICIENTE
+   ']'           0.34%    0.01%   -0.33%          89  INSUFICIENTE
+
+6. CRUCE CON VOCABULARIO (vocab.txt)
+------------------------------------------------------------------------
+   Chars en vocab.txt      : 99
+   Chars en dataset        : 99
+   Chars cubiertos         : 99
+   Chars fuera del vocab   : 0
+   Chars sin ejemplos      : 0
+
+7. DIAGNÓSTICO AUTOMÁTICO
+------------------------------------------------------------------------
+   [ OK ] Todas las imágenes se leyeron correctamente.
+   [ OK ] Ninguna imagen degenerada detectada (todas tienen contenido 
+            visible).
+   [ OK ] CTC: todas las imágenes cumplen restricción ancho >= 
+            longitud×4.
+   [ OK ] Variabilidad de anchos aceptable (CV=39%).
+   [ OK ] Fuentes bien balanceadas (ratio max/min = 1.00).
+   [ OK ] Todas las longitudes de etiqueta están en rango óptimo (5–90 
+            chars).
+   [ OK ] Todos los chars del dataset están cubiertos por vocab.txt.
+   [ OK ] Todos los chars especiales del español tienen ≥500 
+            apariciones.
+
+========================================================================
