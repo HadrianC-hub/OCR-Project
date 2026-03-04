@@ -40,10 +40,7 @@ except ImportError:
 
 STRIDE_CNN = 4
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  1. CARGA DE MÉTRICAS
-# ══════════════════════════════════════════════════════════════════════════════
-
+# CARGA DE MÉTRICAS
 def cargar_metricas(dataset_dir: Path) -> dict:
     """
     Recorre todos los pares .txt/.png del dataset y extrae:
@@ -123,10 +120,7 @@ def cargar_metricas(dataset_dir: Path) -> dict:
         "archivos_txt":     archivos_txt,
     }
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  2. ALERTAS AUTOMÁTICAS
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ALERTAS AUTOMÁTICAS
 def analizar_alertas(m: dict) -> list:
     alertas = []
 
@@ -238,10 +232,7 @@ def analizar_alertas(m: dict) -> list:
 
     return alertas
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  3. FIGURA PARA LA TESIS
-# ══════════════════════════════════════════════════════════════════════════════
-
+# FIGURA
 def generar_figura(m: dict, alertas: list, output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -529,10 +520,7 @@ def generar_figura(m: dict, alertas: list, output_path: Path):
     plt.close()
     print(f"Figura guardada -> {output_path.resolve()}")
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  4. INFORME DE TEXTO
-# ══════════════════════════════════════════════════════════════════════════════
-
+#  INFORME
 def generar_informe(m: dict, alertas: list, output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     av    = m["anchos"][m["anchos"] > 0]
@@ -702,10 +690,7 @@ def generar_informe(m: dict, alertas: list, output_path: Path):
 
     print(f"Informe guardado -> {output_path.resolve()}")
 
-# ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
-# ══════════════════════════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
     print("=" * 60)
     print("  EDA — DATASET SINTÉTICO OCR — ESPAÑOL")

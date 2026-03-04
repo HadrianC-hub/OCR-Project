@@ -2,14 +2,11 @@ from pathlib import Path
 from collections import Counter
 from generator import FRECUENCIAS_OBJETIVO
 
-# ── Rutas (relativas al directorio donde se ejecuta el script) ────────────────
 CORPUS_DIR = Path("Corpus")
 OUTPUT_DIR = Path("Vocabulary")
 OUTPUT_FILE = OUTPUT_DIR / "vocab.txt"
 
-
 #  CONSTRUCCIÓN DEL VOCABULARIO
-
 def construir_vocab() -> list:
     """
     Construye la lista ordenada de caracteres del vocabulario.
@@ -43,21 +40,17 @@ def construir_vocab() -> list:
     vocab = [c for c in vocab if not (c in seen or seen.add(c))]
     return vocab
 
-
 #  GUARDADO
-
 def guardar_vocab(vocab: list):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     with OUTPUT_FILE.open("w", encoding="utf-8") as f:
         for char in vocab:
             f.write(char + "\n")
     print(f"vocab.txt guardado -> {OUTPUT_FILE.resolve()}")
-    print(f"   {len(vocab)} caracteres  (índices 0 – {len(vocab) - 1})")
+    print(f"   {len(vocab)} caracteres  (índices 0 - {len(vocab) - 1})")
     print(f"   Token CTC 'blank' = índice {len(vocab)}  (añadido por el framework)")
 
-
 #  TABLA DE ÍNDICES
-
 def imprimir_tabla(vocab: list):
     print("\n── Tabla de índices ──────────────────────────────────────────────")
     print(f"  {'IDX':>4}  {'CHAR':^6}  CATEGORÍA")
@@ -73,16 +66,14 @@ def imprimir_tabla(vocab: list):
     print(f"  {len(vocab):>4}  {'[blank]':^6}  token CTC (interno al framework)")
     print()
 
-
 #  VERIFICACIÓN CONTRA EL CORPUS
-
 def verificar_contra_corpus(vocab: list):
     """
     Lee todos los .txt de CORPUS_DIR y comprueba que cada carácter
     que aparece en ellos esté cubierto por el vocabulario.
     """
     if not CORPUS_DIR.exists():
-        print(f"Carpeta '{CORPUS_DIR}' no encontrada — verificación omitida.")
+        print(f"Carpeta '{CORPUS_DIR}' no encontrada - verificación omitida.")
         return
 
     archivos = sorted(CORPUS_DIR.glob("*.txt"))
@@ -104,7 +95,7 @@ def verificar_contra_corpus(vocab: list):
     if fuera_vocab:
         print("AVISO - caracteres en el corpus NO cubiertos por el vocabulario:")
         for c, n in sorted(fuera_vocab.items(), key=lambda x: x[1], reverse=True):
-            print(f"   '{c}'  U+{ord(c):04X}  →  {n:,} apariciones")
+            print(f"   '{c}'  U+{ord(c):04X}  ->  {n:,} apariciones")
         print("   -> Añádelos a FRECUENCIAS_OBJETIVO en generator.py")
     else:
         print("OK - todos los caracteres del corpus están en el vocabulario.")
@@ -115,11 +106,7 @@ def verificar_contra_corpus(vocab: list):
         print(f"   {''.join(sin_uso)}")
         print("   -> El modelo los tendrá en su alfabeto pero sin ejemplos reales.")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
-# ══════════════════════════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
     print("══════════════════════════════════════════════════════════════")
     print("  GENERADOR DE VOCABULARIO OCR")

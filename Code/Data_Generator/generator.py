@@ -7,7 +7,6 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 
 #  CONFIGURACIÓN
-
 CORPUS_DIR  = "Corpus"
 FONTS_DIR   = "Fonts"
 OUTPUT_DIR  = "Generated"
@@ -28,7 +27,6 @@ MARGIN_RIGHT  = 30
 ENABLE_TYPEWRITER_FX = True
 
 # FRECUENCIAS OBJETIVO DE LA GENERACIÓN POR CARACTER
-
 FRECUENCIAS_OBJETIVO = {
 
     # ── Vocales minúsculas (Grupo A) ──────────────────────────────────────────
@@ -104,7 +102,6 @@ FRECUENCIAS_OBJETIVO = {
 }
 
 #  CORPUS
-
 def leer_corpus(corpus_dir: str):
     tokens_totales = []
     corpus_path = Path(corpus_dir)
@@ -150,7 +147,6 @@ def obtener_fuentes(fonts_dir: str) -> list:
     return [str(f) for f in fuentes]
 
 #  STRINGS BALANCEADOS
-
 def _calcular_deficit(contador: Counter, obj: dict, total: int) -> dict:
     total_peso = sum(obj.values())
     return {
@@ -212,7 +208,6 @@ def generar_strings_balanceados(
     return strings
 
 #  RENDERIZADO DE TEXTO
-
 _FONT_CACHE: dict = {}
 
 def _cargar_fuente(font_path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -250,9 +245,6 @@ def renderizar_texto(
     return img
 
 # Parámetros ajustados para pipeline con binarización posterior.
-# Los rangos son ligeramente más amplios que en un pipeline sin binarización
-# porque el preprocesamiento actúa como regulador: el efecto que llega al
-# modelo es siempre la binarización del ruido, no el ruido en sí.
 GAUSS_SIGMA_RANGE = (2.0, 8.0)      # sigma más alto -> bordes más difusos al binarizar
 SP_DENSITY_RANGE  = (0.001, 0.007)  # hasta 0.7 % de píxeles afectados
 BLUR_PROB         = 0.50            # 50 % de imágenes con ink bleed simulado
@@ -262,11 +254,11 @@ def aplicar_efecto_maquina(img: Image.Image) -> Image.Image:
     arr  = np.array(img, dtype=np.float32)
     h, w = arr.shape[:2]
 
-    # 1. Ruido gaussiano — modifica cómo binariza Sauvola en los bordes
+    # 1. Ruido gaussiano - modifica cómo binariza Sauvola en los bordes
     sigma = random.uniform(*GAUSS_SIGMA_RANGE)
     arr  += np.random.normal(0, sigma, arr.shape)
 
-    # 2. Sal y pimienta — artefactos puntuales que persisten tras binarizar
+    # 2. Sal y pimienta - artefactos puntuales que persisten tras binarizar
     densidad  = random.uniform(*SP_DENSITY_RANGE)
     n_pixeles = int(h * w * densidad)
 
@@ -281,7 +273,7 @@ def aplicar_efecto_maquina(img: Image.Image) -> Image.Image:
     arr = np.clip(arr, 0, 255).astype(np.uint8)
     img = Image.fromarray(arr)
 
-    # 3. Suavizado leve — simula ink bleed y resolución finita del escáner
+    # 3. Suavizado leve - simula ink bleed y resolución finita del escáner
     if random.random() < BLUR_PROB:
         img = img.filter(ImageFilter.GaussianBlur(
             radius=random.uniform(*BLUR_RADIUS_RANGE)
@@ -290,7 +282,6 @@ def aplicar_efecto_maquina(img: Image.Image) -> Image.Image:
     return img
 
 #  VERIFICACIÓN | GENERACIÓN DEL DATASET Y REPORTE
-
 def verificar_imagen(img: Image.Image) -> bool:
     """Devuelve True si no hay píxeles oscuros en los bordes (= sin recorte)."""
     arr    = np.array(img.convert("L"))
