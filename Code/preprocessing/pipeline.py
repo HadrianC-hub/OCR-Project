@@ -94,7 +94,7 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
     max_win        = max(15, min(m.H, m.W) // 2)
     raw_win        = max(15, min(201, int(m.estimated_text_h * 1.5), max_win))
     sauvola_window = raw_win + (0 if raw_win % 2 == 1 else 1)
-    sauvola_k      = 0.12 if m.contrast < 50 else 0.18 if m.contrast < 80 else 0.25
+    sauvola_k      = 0.10 if m.contrast < 50 else 0.17 if m.contrast < 80 else 0.25
     global_floor_pct = 93.0 if m.contrast < 50 else 92.0 if m.contrast < 80 else 0.0
 
     line_merge_gap    = max(4, min(15, int(m.estimated_text_h * 0.08)))
@@ -471,7 +471,7 @@ def deskew_image(
 
     M = cv2.getRotationMatrix2D((w // 2, h // 2), median_angle, 1.0)
     corrected = cv2.warpAffine(gray, M, (w, h),
-                               flags=cv2.INTER_LINEAR,
+                               flags=cv2.INTER_NEAREST,
                                borderMode=cv2.BORDER_REPLICATE)
     return corrected, median_angle
 
@@ -524,7 +524,7 @@ def deskew_block(binary: np.ndarray, max_angle: float = 15.0) -> tuple[np.ndarra
     H, W = binary.shape
     M    = cv2.getRotationMatrix2D((W / 2.0, H / 2.0), angle, 1.0)
     return cv2.warpAffine(binary, M, (W, H),
-                          flags=cv2.INTER_LINEAR,
+                          flags=cv2.INTER_NEAREST,
                           borderMode=cv2.BORDER_CONSTANT, borderValue=255), angle
 
 

@@ -1,41 +1,3 @@
-"""
-preprocessing/binarization.py
-──────────────────────────────
-Binarización adaptativa de Sauvola para documentos impresos y de
-máquina de escribir.
-
-Por qué Sauvola y no un umbral global (Otsu):
-  Los documentos reales tienen iluminación no uniforme, manchas, bordes
-  más oscuros y degradación local del papel. Un umbral global convierte
-  esas variaciones en ruido de texto; Sauvola calcula un umbral diferente
-  para cada píxel basándose en la media y la desviación estándar de su
-  vecindario, lo que elimina el efecto de la iluminación no uniforme y
-  preserva los trazos finos de las máquinas de escribir.
-
-La fórmula (Sauvola & Pietikäinen, 2000):
-  T(x,y) = μ(x,y) · [1 + k · (σ(x,y)/R − 1)]
-
-  donde:
-    μ(x,y)  = media local en la ventana w×w centrada en (x,y)
-    σ(x,y)  = desviación estándar local
-    R       = rango dinámico de σ (típicamente 128 para imágenes 8-bit)
-    k       = parámetro de sensibilidad (0.2–0.5; valores altos
-              preservan más fondo, valores bajos más texto)
-
-Responsabilidades de este módulo:
-  - Recibe siempre un np.ndarray ya en escala de grises (la selección de
-    canal BGR es responsabilidad exclusiva de pipeline.to_gray()).
-  - Aplica opcionalmente CLAHE y/o filtro bilateral antes de Sauvola.
-  - No realiza I/O: quien necesite cargar una imagen desde disco debe
-    usar pipeline.load_image() primero.
-
-Coherencia con el generador:
-  generator.py aplica ruido gaussiano, sal-pimienta y suavizado antes
-  de guardar las imágenes sintéticas. Esta binarización es la misma
-  que se usará en producción, cerrando el domain gap entre datos
-  sintéticos y documentos reales.
-"""
-
 import numpy as np
 import cv2
 from scipy.ndimage import uniform_filter
@@ -57,34 +19,7 @@ def sauvola(
     r:                float = DEFAULT_R,
     global_floor_pct: float = 0.0,
 ) -> np.ndarray:
-    """
-    Aplica binarización de Sauvola a una imagen en escala de grises.
 
-    Parámetros
-    ----------
-    img_gray         : np.ndarray  shape (H, W), dtype uint8
-    window           : tamaño de ventana local (impar)
-    k                : sensibilidad (0.1–0.5)
-    r                : rango dinámico de σ
-    global_floor_pct : percentil [0–100] por encima del cual un píxel NUNCA
-                       puede clasificarse como texto, independientemente del
-                       umbral local. 0 = desactivado.
-
-                       Propósito: Sauvola puede clasificar como texto píxeles
-                       de fondo (manchas, grano de papel) que localmente son
-                       los más oscuros de su vecindad pero que globalmente son
-                       claramente más claros que la tinta real. El piso global
-                       impone que ningún píxel más brillante que este percentil
-                       del fondo estimado pueda ser texto.
-
-                       Valor recomendado: 85–92 para documentos con suciedad
-                       moderada. Valores más altos son más conservadores.
-
-    Retorna
-    -------
-    np.ndarray  shape (H, W), dtype uint8
-        0 = texto (negro), 255 = fondo (blanco).
-    """
     if img_gray.ndim != 2:
         raise ValueError(
             f"Se esperaba imagen 2D (escala de grises), "
@@ -109,6 +44,39 @@ def sauvola(
 
     return binary
 
+def auto_tune_sauvola_k(
+    gray: np.ndarray,
+    window: int,
+    k_init: float = 0.15,
+    target_ink: tuple = (0.08, 0.18),
+    max_iter: int = 5,
+) -> float:
+
+    k = k_init
+
+    # 🔹 1. Crear máscara de “zonas relevantes”
+    # evita fondo blanco dominante
+    thr = np.percentile(gray, 90)
+    mask = gray < thr
+
+    # fallback por si la máscara queda vacía
+    if mask.sum() < gray.size * 0.05:
+        mask = np.ones_like(gray, dtype=bool)
+
+    for _ in range(max_iter):
+        binary = sauvola(gray, window=window, k=k)
+
+        # 🔹 2. Calcular tinta SOLO en zonas relevantes
+        ink_ratio = float((binary[mask] < 128).mean())
+
+        if ink_ratio > target_ink[1]:
+            k *= 0.85
+        elif ink_ratio < target_ink[0]:
+            k *= 1.15
+        else:
+            break
+
+    return float(np.clip(k, 0.05, 0.35))
 
 # Mejora de contraste
 
@@ -117,19 +85,7 @@ def enhance_contrast(
     clip_limit: float = 2.5,
     tile_size:  int   = 16,
 ) -> np.ndarray:
-    """
-    Aplica CLAHE (Contrast Limited Adaptive Histogram Equalization).
 
-    Imprescindible en documentos fotográficos (no escaneados), papel
-    envejecido o imágenes con iluminación desigual donde la diferencia
-    entre tinta y fondo es menor de ~30 niveles de gris.
-
-    Parámetros
-    ----------
-    gray       : imagen en escala de grises uint8
-    clip_limit : límite de amplificación (2–4 recomendado)
-    tile_size  : tamaño de las teselas en píxeles (8–32)
-    """
     clahe = cv2.createCLAHE(
         clipLimit    = clip_limit,
         tileGridSize = (tile_size, tile_size),
@@ -145,23 +101,7 @@ def bilateral_denoise(
     sigma_color: float = 75.0,
     sigma_space: float = 75.0,
 ) -> np.ndarray:
-    """
-    Filtro bilateral: reduce ruido preservando los bordes de los trazos.
 
-    A diferencia del filtro Gaussiano, el bilateral pondera cada píxel
-    vecino tanto por su distancia espacial como por su similitud de
-    intensidad, lo que evita el borroneo de los bordes del texto.
-
-    Recomendado para documentos con ruido granular (papel envejecido,
-    fotocopias) antes de Sauvola. No reemplaza a CLAHE: pueden combinarse.
-
-    Parámetros
-    ----------
-    gray        : imagen en escala de grises uint8
-    diameter    : diámetro del vecindario de cada píxel (5–15)
-    sigma_color : varianza de color (25–150; valores altos = más suavizado)
-    sigma_space : varianza espacial (25–150; debe coincidir con diameter)
-    """
     return cv2.bilateralFilter(gray, diameter, sigma_color, sigma_space)
 
 
@@ -171,42 +111,7 @@ def normalize_illumination(
     gray:        np.ndarray,
     kernel_size: int = 0,
 ) -> np.ndarray:
-    """
-    Normaliza la iluminación dividiendo la imagen por la estimación del fondo.
 
-    Usa closing morfológico con un kernel grande para estimar el fondo
-    (papel, manchas, variaciones de iluminación). Al dividir la imagen
-    original por esa estimación, los píxeles de fondo se aproximan a 255
-    y los trazos de tinta mantienen su contraste relativo, independientemente
-    de si el papel a su alrededor era claro u oscuro.
-
-    Efecto sobre las manchas del papel
-    ────────────────────────────────────
-    Una mancha de envejecimiento es un área donde el fondo es localmente más
-    oscuro que el resto del papel. El closing la incluye en la estimación del
-    fondo. Al dividir, esa zona oscura "sube" a 255, eliminando la mancha de
-    la imagen normalizada. La tinta en esa zona también sube, pero sigue siendo
-    mucho más oscura que 255 por lo que Sauvola la clasifica correctamente.
-
-    Por qué closing y no opening
-    ──────────────────────────────
-    Opening erosiona primero (elimina picos finos) y luego dilata. Para texto
-    sobre papel, los picos finos SON la tinta → opening los elimina del fondo
-    estimado → el fondo subestima la zona de tinta → artifacts post-división.
-    Closing dilata primero (llena valles = ignora la tinta) y luego erosiona.
-    El resultado es una estimación del fondo que "salta por encima" de los
-    trazos de tinta sin ser distorsionada por ellos.
-
-    Parámetros
-    ──────────
-    gray        : imagen en escala de grises uint8
-    kernel_size : tamaño del kernel de closing (0 = automático: min(H,W)//15,
-                  mínimo 25). Debe ser mayor que el grosor máximo de los trazos.
-
-    Retorna
-    ───────
-    np.ndarray  shape (H, W), dtype uint8  — misma forma que la entrada.
-    """
     H, W = gray.shape
     if kernel_size <= 0:
         kernel_size = max(25, min(H, W) // 15)
@@ -242,44 +147,7 @@ def binarize(
     use_remove_bg:    bool  = False,
     remove_bg_kernel: int   = 0,
 ) -> np.ndarray:
-    """
-    Binariza una imagen de documento.
 
-    La imagen debe llegar ya en escala de grises (shape (H, W)) o BGR
-    (shape (H, W, 3)). La selección del canal óptimo (gris estándar vs
-    canal B para tinta azul) es responsabilidad de pipeline.to_gray(),
-    que debe aplicarse antes de llamar a esta función.
-
-    Parámetros
-    ----------
-    img : np.ndarray
-        Imagen en escala de grises o BGR. Si es BGR se convierte a gris
-        con la fórmula estándar.
-    window, k, r : parámetros de Sauvola.
-    invert : bool
-        Invierte la salida (para fondos oscuros).
-    use_remove_bg : bool
-        Normaliza iluminación antes del pipeline bilateral+CLAHE+Sauvola.
-        Usar para documentos con manchas de papel o iluminación desigual.
-        Ver normalize_illumination() para detalles.
-    remove_bg_kernel : int
-        Tamaño del kernel morfológico para la normalización (0 = automático).
-    use_clahe : bool
-        Amplifica contraste local antes de Sauvola.
-    clahe_clip, clahe_tile : parámetros de CLAHE.
-    use_bilateral : bool
-        Aplica filtro bilateral antes de Sauvola (y antes de CLAHE si ambos).
-    bilateral_d, bilateral_sc, bilateral_ss : parámetros del bilateral.
-    global_floor_pct : float [0–100]
-        Percentil por encima del cual ningún píxel puede ser texto.
-        Ver docstring de sauvola() para detalles.
-        Valor típico para documentos ruidosos: 85–93. 0 = desactivado.
-
-    Retorna
-    -------
-    np.ndarray  shape (H, W), dtype uint8
-        0 = texto (negro), 255 = fondo (blanco).
-    """
     if img.ndim == 3:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     else:
@@ -302,6 +170,8 @@ def binarize(
     if use_clahe:
         gray = enhance_contrast(gray, clip_limit=clahe_clip, tile_size=clahe_tile)
 
+    k = auto_tune_sauvola_k(gray, window=window, k_init=k)
+
     binary = sauvola(gray, window=window, k=k, r=r,
                      global_floor_pct=global_floor_pct)
 
@@ -318,15 +188,7 @@ def clean_binary(
     morph_open:  int = 0,
     morph_close: int = 0,
 ) -> np.ndarray:
-    """
-    Post-procesado morfológico ligero sobre la imagen binaria.
 
-    morph_open  > 0 : elimina puntitos de ruido (sal y pimienta residual)
-    morph_close > 0 : rellena pequeños huecos en los trazos de texto
-
-    Valores recomendados: 2–3. Nunca usar valores grandes o se degradan
-    los trazos finos de las máquinas de escribir.
-    """
     result = binary.copy()
 
     if morph_open > 0:
@@ -349,18 +211,7 @@ def filter_small_components(
     min_area_px:   int,
     max_area_frac: float = 0.10,
 ) -> np.ndarray:
-    """
-    Elimina componentes conexos con área fuera de [min_area_px, max_area].
 
-    ⚠ Umbral fijo — frágil ante variaciones de DPI y tamaño de fuente.
-    Usa adaptive_filter_components() siempre que sea posible.
-
-    Parámetros
-    ----------
-    binary        : imagen binaria uint8 (0=texto, 255=fondo)
-    min_area_px   : área mínima en píxeles para conservar un componente
-    max_area_frac : fracción máxima del área total de la imagen (default 0.10)
-    """
     H, W     = binary.shape
     max_area = int(H * W * max_area_frac)
 
@@ -383,39 +234,7 @@ def filter_small_components(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _noise_gap_threshold(areas: np.ndarray) -> int:
-    """
-    Detecta el umbral natural que separa blobs de ruido de componentes reales
-    buscando la primera brecha significativa en la distribución de áreas.
 
-    Principio
-    ─────────
-    Los blobs de ruido de Sauvola forman un cluster denso en la zona baja
-    del histograma: 1, 1, 2, 2, 3, 4, 5... (muchos, pequeños, consecutivos).
-    El primer componente de texto real (punto, coma, punto de i) es
-    notablemente mayor: hay un salto relativo ≥ GAP_RATIO.
-
-    Tres guardas conservadoras para no borrar texto legítimo
-    ─────────────────────────────────────────────────────────
-    1. MAX_NOISE_AREA = 50 px²
-       Límite absoluto de búsqueda. A cualquier DPI donde el OCR sea viable
-       (≥ 150 dpi), un punto real tiene área > 50 px². Lo que cae por debajo
-       son speckles de 1–3 px de lado impossibles de ser tinta.
-       (A 72 dpi el documento es borroso e ilegible independientemente.)
-
-    2. GAP_RATIO = 2.5
-       El salto debe ser brusco. Evita confundir dos puntos de tamaño
-       ligeramente distinto con un salto ruido→texto.
-
-    3. MIN_NOISE_COUNT = 5
-       Se necesitan ≥ 5 componentes debajo del umbral para activar el filtro.
-       Si hay pocos componentes pequeños son probablemente puntuación real
-       (documento limpio sin ruido apreciable) y no se tocan.
-
-    Retorna
-    -------
-    int — threshold de área; componentes ≤ este valor son ruido.
-          0 si no se encontró brecha clara → no filtrar.
-    """
     GAP_RATIO       = 2.5
     MAX_NOISE_AREA  = 50    # px² — cap absoluto
     MIN_NOISE_COUNT = 5     # mínimo de blobs en el cluster
@@ -441,48 +260,7 @@ def adaptive_filter_components(
     binary:        np.ndarray,
     max_area_frac: float = 0.10,
 ) -> np.ndarray:
-    """
-    Elimina blobs de ruido de Sauvola sin ningún parámetro externo.
 
-    Por qué es mejor que filter_small_components()
-    ───────────────────────────────────────────────
-    filter_small_components() necesita min_area_px, que depende del DPI y
-    del tamaño de fuente — ambos desconocidos en tiempo de configuración.
-    Un umbral fijo calculado antes de ver la imagen binarizada produce:
-      • Umbrales demasiado altos → borra puntos, comas, puntos de i, tildes.
-      • Umbrales demasiado bajos → deja ruido de papel.
-
-    Este método deriva el umbral directamente de la distribución real de
-    componentes del binario, sin suponer nada sobre el documento.
-
-    Comportamiento esperado según tipo de documento
-    ─────────────────────────────────────────────────
-    • Documento limpio / bilateral activo:
-      Pocos o ningún componente < 50 px² → threshold=0 → sin filtrado.
-
-    • Ruido moderado de papel (bilateral activo):
-      Cluster de ≥ 5 blobs en 1–10 px², salto a punto/coma en 40–80 px²
-      → threshold ≈ 10 → blobs borrados, puntuación conservada.
-
-    • Documento muy degradado (bajo contraste, sin bilateral):
-      Muchos blobs 1–30 px², salto a puntuación en 50–150 px²
-      → threshold ≈ 30 → blobs borrados, puntuación conservada.
-
-    • Impreso de baja resolución (< 150 dpi):
-      Ruido y puntos solapan en área, no hay salto ≥ 2.5× bajo 50 px²
-      → threshold=0 → sin filtrado (conserva todo, incluso posible ruido,
-      pero nunca borra puntuación real).
-
-    Parámetros
-    ----------
-    binary        : imagen binaria uint8 (0=texto, 255=fondo)
-    max_area_frac : fracción máxima del área total → protege contra manchas
-                    enormes de iluminación. Default 0.10.
-
-    Retorna
-    -------
-    np.ndarray  misma shape y dtype que la entrada.
-    """
     H, W     = binary.shape
     max_area = int(H * W * max_area_frac)
 

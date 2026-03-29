@@ -32,7 +32,7 @@ def resize_to_height(
         return np.full((target_height, min_width), 255, dtype=img.dtype)
     scale     = target_height / h
     new_width = max(min_width, int(round(w * scale)))
-    interp    = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    interp    = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_NEAREST
     return cv2.resize(img, (new_width, target_height), interpolation=interp)
 
 
@@ -398,7 +398,7 @@ def straighten_line(
     row_grid = np.tile(np.arange(H, dtype=np.float32)[:, None], (1, W))
     map_y    = (row_grid + shifts[np.newaxis, :] + pad_top).astype(np.float32)
     result   = cv2.remap(src, map_x, map_y,
-                         interpolation=cv2.INTER_LINEAR,
+                         interpolation=cv2.INTER_NEAREST,
                          borderMode=cv2.BORDER_CONSTANT, borderValue=255)
 
     # Controles de calidad post-remap
