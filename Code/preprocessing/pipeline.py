@@ -99,7 +99,7 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
 
     line_merge_gap    = max(4, min(15, int(m.estimated_text_h * 0.08)))
     projection_smooth = max(3, min(9,  int(m.estimated_text_h * 0.08)))
-    expand_no_ink_gap = max(4, int(m.estimated_text_h * 0.08))
+    expand_no_ink_gap = max(8, int(m.estimated_text_h * 0.50))
 
     return PipelineConfig(
         sauvola_window=sauvola_window, sauvola_k=sauvola_k,
@@ -542,11 +542,21 @@ def _process_with_block_deskew(
     """
     lines:       list[np.ndarray]               = []
     valid_boxes: list[tuple[int, int, int, int]] = []
+    H_bin = binary.shape[0]
 
     for (by0, by1, bx0, bx1) in block_boxes:
         if (by1 - by0) < cfg.min_line_height or (bx1 - bx0) < cfg.min_line_width:
             continue
-        crop = binary[by0:by1, bx0:bx1]
+
+        # Padding vertical para capturar diacríticos (tildes, acentos…) que
+        # sobresalen fuera del bounding-box del bloque detectado por segment_all.
+        # Se usa la mitad de la altura del bloque como margen.
+        block_h = by1 - by0
+        pad_v   = max(cfg.expand_no_ink_gap, block_h // 2)
+        crop_y0 = max(0,     by0 - pad_v)
+        crop_y1 = min(H_bin, by1 + pad_v)
+
+        crop = binary[crop_y0:crop_y1, bx0:bx1]
         if crop.size == 0 or not (crop < 128).any():
             continue
 
@@ -558,14 +568,44 @@ def _process_with_block_deskew(
         if not line_ys:
             continue
 
+        # Filtrar líneas detectadas en el crop: conservar solo aquellas cuyo
+        # centro vertical cae dentro de la región ORIGINAL del bloque (sin el
+        # padding). Esto evita capturar líneas de bloques adyacentes que queden
+        # dentro del área de padding, lo que causaría cajas solapadas.
+        block_top_in_crop = by0 - crop_y0
+        block_bot_in_crop = by1 - crop_y0
+        line_ys = [
+            (yt, yb) for (yt, yb) in line_ys
+            if block_top_in_crop <= (yt + yb) / 2 <= block_bot_in_crop
+        ]
+        if not line_ys:
+            continue
+
         bW           = rotated.shape[1]
         boxes_local  = [(yt, yb, 0, bW) for (yt, yb) in line_ys]
         if cfg.expand_to_ink:
-            boxes_local = expand_all_boxes(
-                rotated, boxes_local,
+            # Safe-crop asimétrico:
+            #   · Hacia arriba  → safe_y0 = 0 (todo el pad_v disponible).
+            #     Captura acentos sobre mayúsculas (Ú, Í, Á…) cuyo hueco
+            #     con el cuerpo supera cualquier margen fijo y que Otsu ya
+            #     ignora, dejando y_top por debajo del acento.
+            #   · Hacia abajo   → safe_y1 ajustado al bloque + accent_margin.
+            #     Evita que la última línea sangre hasta el bloque siguiente
+            #     que cae dentro del padding inferior.
+            accent_margin = cfg.expand_no_ink_gap
+            safe_y0 = 0                                          # todo el pad_v
+            safe_y1 = min(rotated.shape[0], block_bot_in_crop + accent_margin)
+            safe_crop     = rotated[safe_y0:safe_y1, :]
+            boxes_in_safe = [(yt - safe_y0, yb - safe_y0, xl, xr)
+                             for (yt, yb, xl, xr) in boxes_local]
+            expanded = expand_all_boxes(
+                safe_crop, boxes_in_safe,
                 max_expand_frac=cfg.expand_max_frac,
+                no_ink_gap=cfg.expand_no_ink_gap,
                 min_ink_frac=cfg.expand_min_ink_frac,
             )
+            boxes_local = [(yt + safe_y0, yb + safe_y0, xl, xr)
+                           for (yt, yb, xl, xr) in expanded]
 
         for (yt, yb, xl, xr) in boxes_local:
             strip = rotated[yt:yb, xl:xr]
@@ -583,7 +623,8 @@ def _process_with_block_deskew(
             if float((norm < 0.5).mean()) < 0.02:
                 continue
             lines.append(norm)
-            valid_boxes.append((by0 + yt, by0 + yb, bx0, bx1))
+            # Las coordenadas se expresan respecto al origen de la imagen original.
+            valid_boxes.append((crop_y0 + yt, crop_y0 + yb, bx0, bx1))
 
     return lines, valid_boxes
 
@@ -652,6 +693,7 @@ def run(
             boxes_4d = expand_all_boxes(
                 binary, boxes_4d,
                 max_expand_frac=cfg.expand_max_frac,
+                no_ink_gap=cfg.expand_no_ink_gap,
                 min_ink_frac=cfg.expand_min_ink_frac,
             )
         lines, valid_boxes = [], []

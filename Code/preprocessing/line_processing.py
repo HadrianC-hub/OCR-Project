@@ -255,13 +255,17 @@ def expand_all_boxes(
     binary:          np.ndarray,
     boxes:           list[tuple[int, int, int, int]],
     max_expand_frac: float = 0.80,   # conservado para compatibilidad
-    no_ink_gap:      int   = 4,      # conservado para compatibilidad
+    no_ink_gap:      int   = 4,      # filas vacías consecutivas permitidas antes de detenerse
     min_ink_frac:    float = 0.003,
 ) -> list[tuple[int, int, int, int]]:
     """
     Expande cada caja (y_top, y_bot, x_left, x_right) fila a fila hasta
     encontrar la primera fila sin tinta o colisionar con la línea adyacente
     de la misma columna.
+
+    `no_ink_gap` controla cuántas filas vacías consecutivas se toleran antes
+    de detenerse, permitiendo saltar el hueco entre el cuerpo de una letra y
+    sus diacríticos (tildes, acentos, puntos de i/j…).
     """
     from collections import defaultdict
 
@@ -286,19 +290,32 @@ def expand_all_boxes(
             limit_top    = (local[li - 1][1] + yt) // 2 if li > 0     else 0
             limit_bot    = (yb + local[li + 1][0]) // 2 if li < n - 1 else H_bin
 
+            # Expansión hacia arriba: se busca la fila con tinta MÁS ALTA
+            # dentro de [limit_top, yt), sin límite de gap consecutivos.
+            # El acento sobre una mayúscula (Ú, Í, Á…) es un componente
+            # diminuto separado del cuerpo por un hueco variable que el
+            # umbral Otsu ya ignora antes de llegar aquí (y_top queda por
+            # debajo del acento). Cortar por gap consecutivos lo perdería
+            # igualmente. El límite duro `limit_top` (punto medio con la
+            # línea anterior) garantiza que no se capture tinta ajena.
             new_top = yt
             for y in range(yt - 1, limit_top - 1, -1):
                 if row_has_ink(y):
                     new_top = y
-                else:
-                    break
 
-            new_bot = yb
+            # Expansión hacia abajo: misma lógica con tolerancia de gap
+            new_bot      = yb
+            gap_count    = 0
+            last_ink_row = yb - 1
             for y in range(yb, limit_bot):
                 if row_has_ink(y):
-                    new_bot = y + 1
+                    last_ink_row = y
+                    gap_count    = 0
                 else:
-                    break
+                    gap_count += 1
+                    if gap_count > no_ink_gap:
+                        break
+            new_bot = last_ink_row + 1
 
             result[orig_idx] = (new_top, new_bot, xl, xr)
 

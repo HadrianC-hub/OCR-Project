@@ -15,8 +15,9 @@ from preprocessing.binarization import binarize, clean_binary, filter_small_comp
 
 
 # CONFIGURACIÓN GLOBAL
-INPUT_PATH  = Path("imagenes")   # archivo .jpg individual O carpeta con .jpg
-OUTPUT_DIR  = Path("resultados")   # carpeta de salida para todas las imágenes
+INPUT_PATH       = Path("images")    # archivo .jpg/.png individual O carpeta con imágenes
+OUTPUT_DIR       = Path("results")  # carpeta de salida para todas las imágenes
+SINGLE_LINE_MODE = True               # si True, advierte cuando una imagen no tenga exactamente 1 línea
 
 PALETTE = [
     (46,  204, 113),  (52,  152, 219),  (231,  76,  60),
@@ -77,6 +78,7 @@ def save_line_images(
     lines:       list,
     out:         Path,
     min_ink_pct: float = 2.0,
+    prefix:      str   = "",
 ) -> int:
     """Guarda cada línea normalizada (float32 [0,1]) como JPEG en `out`. Omite líneas vacías."""
     out.mkdir(parents=True, exist_ok=True)
@@ -89,7 +91,8 @@ def save_line_images(
         if not ok:
             print(f"  [WARN] no se pudo codificar línea {i}")
             continue
-        (out / f"line_{i:03d}.jpg").write_bytes(buf.tobytes())
+        filename = f"{prefix}line_{i:03d}.jpg" if prefix else f"line_{i:03d}.jpg"
+        (out / filename).write_bytes(buf.tobytes())
         saved += 1
     return saved
 
@@ -174,6 +177,14 @@ def run_and_visualize(
         for wm in result.warnings:
             print(f"  [!]  {wm}")
 
+    if SINGLE_LINE_MODE and result.n_lines != 1:
+        print(_sep())
+        if result.n_lines == 0:
+            print(f"  [!]  SINGLE_LINE_MODE: no se detecto ninguna linea en '{Path(image_path).name}'")
+        else:
+            print(f"  [!]  SINGLE_LINE_MODE: se esperaba 1 linea pero se detectaron "
+                  f"{result.n_lines} en '{Path(image_path).name}'")
+
     # Reconstruir binary para la visualización
     gray = to_gray(img_bgr, cfg)
     if cfg.deskew:
@@ -210,10 +221,15 @@ def run_and_visualize(
     print(_sep())
     print("  SALIDA")
     print(_sep())
-    lines_dir = out / stem
-    vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
-    n_saved = save_line_images(result.lines, lines_dir)
-    print(f"  [OK]   {n_saved} líneas → {stem}/line_NNN.jpg")
+    if SINGLE_LINE_MODE:
+        # Sin imagen de diagnóstico; líneas directamente en el directorio raíz
+        n_saved = save_line_images(result.lines, out, prefix=stem + "_")
+        print(f"  [OK]   {n_saved} líneas → {stem}_line_NNN.jpg")
+    else:
+        lines_dir = out / stem
+        vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
+        n_saved = save_line_images(result.lines, lines_dir)
+        print(f"  [OK]   {n_saved} líneas → {stem}/line_NNN.jpg")
     print()
     print(_sep("═"))
     print()
@@ -240,10 +256,11 @@ def run_batch(input_dir: Path, output_dir: Path) -> None:
         print(f"ERROR: '{input_dir}' no es una carpeta válida.", file=sys.stderr)
         sys.exit(1)
 
+    _IMG_EXTS = {".jpg", ".jpeg", ".png"}
     images = sorted(p for p in input_dir.iterdir()
-                    if p.suffix.lower() == ".jpg" and p.is_file())
+                    if p.suffix.lower() in _IMG_EXTS and p.is_file())
     if not images:
-        print(f"No se encontraron archivos .jpg en '{input_dir}'.", file=sys.stderr)
+        print(f"No se encontraron archivos .jpg/.jpeg/.png en '{input_dir}'.", file=sys.stderr)
         sys.exit(0)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -273,9 +290,12 @@ def main() -> None:
     out = OUTPUT_DIR.resolve()
     if inp.is_dir():
         run_batch(inp, out)
-    elif inp.is_file():
+    elif inp.is_file() and inp.suffix.lower() in {".jpg", ".jpeg", ".png"}:
         out.mkdir(parents=True, exist_ok=True)
         run_and_visualize(str(inp), str(out))
+    elif inp.is_file():
+        print(f"ERROR: INPUT_PATH='{inp}' no es una imagen soportada (.jpg, .jpeg, .png).", file=sys.stderr)
+        sys.exit(1)
     else:
         print(f"ERROR: INPUT_PATH='{inp}' no existe.", file=sys.stderr)
         sys.exit(1)
