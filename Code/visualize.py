@@ -75,12 +75,17 @@ def vis_lines_detected(
     _save(str(out / f"{prefix}lines_detected.jpg"), vis)
 
 def save_line_images(
-    lines:       list,
-    out:         Path,
-    min_ink_pct: float = 2.0,
-    prefix:      str   = "",
+    lines:        list,
+    out:          Path,
+    min_ink_pct:  float = 2.0,
+    prefix:       str   = "",
+    fixed_name:   str   = "",
 ) -> int:
-    """Guarda cada línea normalizada (float32 [0,1]) como JPEG en `out`. Omite líneas vacías."""
+    """Guarda cada línea normalizada (float32 [0,1]) como JPEG en `out`. Omite líneas vacías.
+
+    Si `fixed_name` está definido, la primera línea válida se guarda con ese nombre exacto
+    (útil en SINGLE_LINE_MODE para obtener simplemente '{stem}.jpg').
+    """
     out.mkdir(parents=True, exist_ok=True)
     saved = 0
     for i, line in enumerate(lines, 1):
@@ -91,9 +96,16 @@ def save_line_images(
         if not ok:
             print(f"  [WARN] no se pudo codificar línea {i}")
             continue
-        filename = f"{prefix}line_{i:03d}.jpg" if prefix else f"line_{i:03d}.jpg"
+        if fixed_name:
+            filename = fixed_name
+        elif prefix:
+            filename = f"{prefix}line_{i:03d}.jpg"
+        else:
+            filename = f"line_{i:03d}.jpg"
         (out / filename).write_bytes(buf.tobytes())
         saved += 1
+        if fixed_name:
+            break   # en modo nombre fijo solo se guarda la primera línea válida
     return saved
 
 
@@ -222,9 +234,9 @@ def run_and_visualize(
     print("  SALIDA")
     print(_sep())
     if SINGLE_LINE_MODE:
-        # Sin imagen de diagnóstico; líneas directamente en el directorio raíz
-        n_saved = save_line_images(result.lines, out, prefix=stem + "_")
-        print(f"  [OK]   {n_saved} líneas → {stem}_line_NNN.jpg")
+        # Sin imagen de diagnóstico; línea guardada directamente como {stem}.jpg
+        n_saved = save_line_images(result.lines, out, fixed_name=f"{stem}.jpg")
+        print(f"  [OK]   {n_saved} líneas → {stem}.jpg")
     else:
         lines_dir = out / stem
         vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
