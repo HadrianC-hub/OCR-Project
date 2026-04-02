@@ -1,20 +1,19 @@
 """
-dataset.py  —  Dataset para pares .png / .txt en una carpeta plana
+dataset.py  —  Dataset para pares .png/.jpg / .txt en una carpeta plana
 
 Formato esperado
 ----------------
 DATA_DIR/
-    imagen_001.png
+    imagen_001.png   ← o .jpg / .jpeg
     imagen_001.txt    ← contiene la transcripción (una sola línea de texto)
-    imagen_002.png
+    imagen_002.jpg
     imagen_002.txt
     ...
 
-Ajusta DATA_DIR y VOCAB_PATH abajo antes de entrenar.
+En Kaggle, DATA_DIR y VOCAB_PATH apuntan a /kaggle/input/<tu-dataset>/...
 """
 
-from __future__ import annotations
-
+import os
 from pathlib import Path
 from typing import List, Tuple
 
@@ -24,40 +23,31 @@ from torchvision import transforms
 from PIL import Image
 
 # ================================================================== #
-#  VARIABLES GLOBALES — ajusta estas rutas antes de entrenar         #
+#  VARIABLES GLOBALES                                                  #
+#  Pueden sobreescribirse vía variables de entorno o directamente     #
 # ================================================================== #
-DATA_DIR   = "images"      # Carpeta con los .png y sus .txt gemelos
-VOCAB_PATH = "vocab/vocab.txt"   # Tu archivo de vocabulario, un carácter por línea
-IMG_HEIGHT = 32            # Alto de normalización (optimizado para CPU)
-CNN_STRIDE = 4             # Stride horizontal acumulado de la CNN
-BLANK_IDX  = 100           # Índice reservado para el token blank de CTC
+DATA_DIR   = os.environ.get("OCR_DATA_DIR",   "images")
+VOCAB_PATH = os.environ.get("OCR_VOCAB_PATH", "vocab/vocab.txt")
+IMG_HEIGHT = 32
+CNN_STRIDE = 4
+BLANK_IDX  = 100
 # ================================================================== #
 
-
-# ------------------------------------------------------------------ #
-# Carga del vocabulario desde vocab.txt                               #
-# ------------------------------------------------------------------ #
 
 def load_vocab(path: str | Path = VOCAB_PATH) -> Tuple[dict, dict]:
     """
     Lee vocab.txt línea a línea y construye char2idx / idx2char.
-
-    El archivo debe tener exactamente un carácter por línea.
-    Las líneas vacías se interpretan como el carácter espacio ' '
-    (necesario porque el espacio en blanco no es visible al guardar).
-    El índice BLANK_IDX queda reservado para el token blank de CTC
-    y no se asigna a ningún carácter del archivo.
+    Las líneas vacías se interpretan como espacio ' '.
     """
     vocab_path = Path(path)
     if not vocab_path.exists():
         raise FileNotFoundError(
             f"No se encontró el archivo de vocabulario en '{vocab_path}'.\n"
-            f"Ajusta VOCAB_PATH en dataset.py."
+            f"Ajusta VOCAB_PATH o la variable de entorno OCR_VOCAB_PATH."
         )
 
     chars = []
     for line in vocab_path.read_text(encoding="utf-8").splitlines():
-        # Una línea vacía representa el carácter espacio
         c = line if line != "" else " "
         if c not in chars:
             chars.append(c)
@@ -74,28 +64,14 @@ def load_vocab(path: str | Path = VOCAB_PATH) -> Tuple[dict, dict]:
     return char2idx, idx2char
 
 
-# Carga global al importar el módulo
 CHAR2IDX, IDX2CHAR = load_vocab(VOCAB_PATH)
 
 
-# ------------------------------------------------------------------ #
-# Codificación / decodificación                                        #
-# ------------------------------------------------------------------ #
-
 def encode(text: str) -> List[int]:
-    """
-    Texto → lista de índices según el vocabulario cargado.
-    Los caracteres ausentes del vocab se descartan silenciosamente.
-    """
     return [CHAR2IDX[c] for c in text if c in CHAR2IDX]
 
 
 def decode_ctc(indices: List[int]) -> str:
-    """
-    Decodificación greedy CTC:
-      1. Elimina los tokens blank (BLANK_IDX)
-      2. Colapsa caracteres contiguos repetidos
-    """
     result, prev = [], None
     for idx in indices:
         if idx != BLANK_IDX and idx != prev:
@@ -104,22 +80,15 @@ def decode_ctc(indices: List[int]) -> str:
     return "".join(result)
 
 
-# ------------------------------------------------------------------ #
-# Dataset principal                                                    #
-# ------------------------------------------------------------------ #
-
 class OCRDataset(Dataset):
     """
-    Carga pares (imagen, transcripción) desde una carpeta plana .png + .txt.
+    Carga pares (imagen, transcripción) desde una carpeta plana.
 
     Parámetros
     ----------
     data_dir : str | Path | None
-        Carpeta con las imágenes y sus .txt. Por defecto usa DATA_DIR.
     img_height : int
-        Alto al que se normalizan las imágenes manteniendo proporción.
     augment : bool
-        Aplica variaciones leves de brillo/contraste (solo en entrenamiento).
     """
 
     def __init__(
@@ -135,31 +104,34 @@ class OCRDataset(Dataset):
         if not self.root.exists():
             raise FileNotFoundError(f"La carpeta de datos no existe: '{self.root}'")
 
-        # Descubrir pares .png / .txt válidos
+        _IMG_EXTS = [".png", ".jpg", ".jpeg"]
+        _seen_stems: dict = {}
+        for ext in _IMG_EXTS:
+            for p in self.root.glob(f"*{ext}"):
+                if p.stem not in _seen_stems:
+                    _seen_stems[p.stem] = p
+        all_images = sorted(_seen_stems.values(), key=lambda p: p.name)
+
         self.samples: List[Tuple[Path, str]] = []
         skipped_no_txt, skipped_empty, skipped_no_vocab = 0, 0, 0
 
-        for img_path in sorted(self.root.glob("*.png")):
+        for img_path in all_images:
             txt_path = img_path.with_suffix(".txt")
-
             if not txt_path.exists():
                 skipped_no_txt += 1
                 continue
-
             text = txt_path.read_text(encoding="utf-8").strip()
             if not text:
                 skipped_empty += 1
                 continue
-
             if len(encode(text)) == 0:
                 skipped_no_vocab += 1
                 continue
-
             self.samples.append((img_path, text))
 
         if len(self.samples) == 0:
             raise FileNotFoundError(
-                f"No se encontraron pares .png/.txt válidos en '{self.root}'.\n"
+                f"No se encontraron pares válidos en '{self.root}'.\n"
                 f"  Sin .txt: {skipped_no_txt} | Vacíos: {skipped_empty} | Sin vocab: {skipped_no_vocab}"
             )
 
@@ -176,7 +148,8 @@ class OCRDataset(Dataset):
         ])
         self._aug = transforms.Compose([
             transforms.Grayscale(1),
-            transforms.ColorJitter(brightness=0.15, contrast=0.15),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2),
+            transforms.RandomAffine(degrees=1, translate=(0.01, 0.01)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5], std=[0.5]),
         ])
@@ -186,37 +159,21 @@ class OCRDataset(Dataset):
 
     def __getitem__(self, idx: int):
         img_path, text = self.samples[idx]
-
         img = Image.open(img_path).convert("L")
         w, h = img.size
         new_w = max(4, int(round(w * self.img_height / h)))
         img = img.resize((new_w, self.img_height), Image.BICUBIC)
-
         tfm = self._aug if (self.augment and torch.rand(1).item() > 0.5) else self._base
         tensor = tfm(img)
-
         label = torch.tensor(encode(text), dtype=torch.long)
         return tensor, label, text
 
 
-# ------------------------------------------------------------------ #
-# collate_fn — agrupa muestras de ancho variable en un batch          #
-# ------------------------------------------------------------------ #
-
 def collate_fn(batch):
     """
     Padding horizontal a la derecha hasta el ancho máximo del batch.
-
-    Retorna
-    -------
-    images         : Tensor [B, 1, H, W_max]
-    flat_labels    : Tensor [suma de longitudes]  — CTCLoss lo requiere plano
-    input_lengths  : Tensor [B]  — pasos temporales = W // CNN_STRIDE
-    target_lengths : Tensor [B]  — longitud de cada etiqueta
-    texts          : List[str]   — transcripciones originales
     """
     images, labels, texts = zip(*batch)
-
     max_w = max(img.shape[2] for img in images)
     B, H  = len(images), images[0].shape[1]
     padded = torch.zeros(B, 1, H, max_w)
