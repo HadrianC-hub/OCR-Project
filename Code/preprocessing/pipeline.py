@@ -470,9 +470,20 @@ def deskew_image(
         return gray, median_angle
 
     M = cv2.getRotationMatrix2D((w // 2, h // 2), median_angle, 1.0)
+    # Estimar el color de fondo a partir de los píxeles del borde de la imagen.
+    # BORDER_REPLICATE puede introducir contenido oscuro del borde del scan
+    # (oscurecimiento del papel, artefactos de escáner) como una banda en las
+    # esquinas rotadas, que tras la binarización aparece como "tinta" falsa en
+    # la primera y última línea de cada bloque. BORDER_CONSTANT con el valor
+    # mediano del borde (≈255 para papel blanco) evita completamente ese efecto.
+    border_pixels = np.concatenate([
+        gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]
+    ])
+    bg_val = int(np.median(border_pixels))
     corrected = cv2.warpAffine(gray, M, (w, h),
                                flags=cv2.INTER_NEAREST,
-                               borderMode=cv2.BORDER_REPLICATE)
+                               borderMode=cv2.BORDER_CONSTANT,
+                               borderValue=bg_val)
     return corrected, median_angle
 
 
@@ -585,15 +596,17 @@ def _process_with_block_deskew(
         boxes_local  = [(yt, yb, 0, bW) for (yt, yb) in line_ys]
         if cfg.expand_to_ink:
             # Safe-crop asimétrico:
-            #   · Hacia arriba  → safe_y0 = 0 (todo el pad_v disponible).
-            #     Captura acentos sobre mayúsculas (Ú, Í, Á…) cuyo hueco
-            #     con el cuerpo supera cualquier margen fijo y que Otsu ya
-            #     ignora, dejando y_top por debajo del acento.
+            #   · Hacia arriba  → safe_y0 limitado a accent_margin por encima
+            #     del borde del bloque. Permite capturar acentos sobre
+            #     mayúsculas (Ú, Í, Á…), pero sin llegar hasta y=0 del crop
+            #     (que incluye pad_v de contenido ajeno al bloque). Con
+            #     safe_y0=0, expand_all_boxes podía expandir la primera línea
+            #     hasta el comienzo del crop y absorber tinta del bloque
+            #     anterior, produciendo manchas en las imágenes individuales.
             #   · Hacia abajo   → safe_y1 ajustado al bloque + accent_margin.
-            #     Evita que la última línea sangre hasta el bloque siguiente
-            #     que cae dentro del padding inferior.
+            #     Evita que la última línea sangre hasta el bloque siguiente.
             accent_margin = cfg.expand_no_ink_gap
-            safe_y0 = 0                                          # todo el pad_v
+            safe_y0 = max(0, block_top_in_crop - accent_margin)  # fix: no llegar a y=0
             safe_y1 = min(rotated.shape[0], block_bot_in_crop + accent_margin)
             safe_crop     = rotated[safe_y0:safe_y1, :]
             boxes_in_safe = [(yt - safe_y0, yb - safe_y0, xl, xr)

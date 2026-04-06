@@ -15,9 +15,9 @@ from preprocessing.binarization import binarize, clean_binary, filter_small_comp
 
 
 # CONFIGURACIÓN GLOBAL
-INPUT_PATH       = Path("images")    # archivo .jpg/.png individual O carpeta con imágenes
-OUTPUT_DIR       = Path("results")  # carpeta de salida para todas las imágenes
-SINGLE_LINE_MODE = True               # si True, advierte cuando una imagen no tenga exactamente 1 línea
+INPUT_PATH       = Path("imagenes")    # archivo .jpg/.png individual O carpeta con imágenes
+OUTPUT_DIR       = Path("resultados")  # carpeta de salida para todas las imágenes
+SINGLE_LINE_MODE = False               # si True, advierte cuando una imagen no tenga exactamente 1 línea
 
 PALETTE = [
     (46,  204, 113),  (52,  152, 219),  (231,  76,  60),
@@ -106,6 +106,39 @@ def save_line_images(
         saved += 1
         if fixed_name:
             break   # en modo nombre fijo solo se guarda la primera línea válida
+    return saved
+
+
+def save_line_crops(
+    img_bgr:    np.ndarray,
+    line_boxes: list,
+    out:        Path,
+    fixed_name: str = "",
+) -> int:
+    """Recorta cada línea directamente de la imagen original y la guarda como JPEG.
+
+    Usa las coordenadas (y_top, y_bot, x_left, x_right) de line_boxes para
+    recortar img_bgr sin ningún procesado adicional, evitando artefactos de
+    binarización o normalización.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    for i, (y_top, y_bot, x_left, x_right) in enumerate(line_boxes, 1):
+        crop = img_bgr[y_top:y_bot, x_left:x_right]
+        if crop.size == 0:
+            continue
+        ok, buf = cv2.imencode(".jpg", crop)
+        if not ok:
+            print(f"  [WARN] no se pudo codificar línea {i}")
+            continue
+        if fixed_name:
+            filename = fixed_name
+        else:
+            filename = f"line_{i:03d}.jpg"
+        (out / filename).write_bytes(buf.tobytes())
+        saved += 1
+        if fixed_name:
+            break
     return saved
 
 
@@ -235,12 +268,12 @@ def run_and_visualize(
     print(_sep())
     if SINGLE_LINE_MODE:
         # Sin imagen de diagnóstico; línea guardada directamente como {stem}.jpg
-        n_saved = save_line_images(result.lines, out, fixed_name=f"{stem}.jpg")
+        n_saved = save_line_crops(binary, result.line_boxes, out, fixed_name=f"{stem}.jpg")
         print(f"  [OK]   {n_saved} líneas → {stem}.jpg")
     else:
         lines_dir = out / stem
         vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
-        n_saved = save_line_images(result.lines, lines_dir)
+        n_saved = save_line_crops(binary, result.line_boxes, lines_dir)
         print(f"  [OK]   {n_saved} líneas → {stem}/line_NNN.jpg")
     print()
     print(_sep("═"))
