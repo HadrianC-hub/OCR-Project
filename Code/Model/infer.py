@@ -1,7 +1,5 @@
 """
-infer.py  —  Inferencia sobre una imagen o carpeta de imágenes
-
-Usa automáticamente GPU si está disponible.
+infer.py  —  Inferencia con beam search CTC corregido y autocrop
 """
 
 import argparse
@@ -12,7 +10,7 @@ from torchvision import transforms
 from PIL import Image
 
 from model   import CRNN
-from dataset import decode_ctc, IMG_HEIGHT
+from dataset import decode_ctc_beam, autocrop_whitespace, IMG_HEIGHT, CNN_STRIDE
 
 
 def get_device() -> torch.device:
@@ -25,9 +23,10 @@ def load_model(checkpoint_path: str, device: torch.device = None):
     ckpt  = torch.load(checkpoint_path, map_location=device)
     cfg   = ckpt.get("config", {})
     model = CRNN(
-        vocab_size=cfg.get("vocab_size",  101),
-        img_height=cfg.get("img_height",  IMG_HEIGHT),
-        hidden_size=cfg.get("hidden_size", 128),
+        vocab_size=cfg.get("vocab_size",   101),
+        img_height=cfg.get("img_height",   IMG_HEIGHT),
+        hidden_size=cfg.get("hidden_size", 256),
+        num_layers=cfg.get("num_layers",   2),
     )
     state = {k.replace("_orig_mod.", ""): v for k, v in ckpt["model_state"].items()}
     model.load_state_dict(state)
@@ -37,26 +36,51 @@ def load_model(checkpoint_path: str, device: torch.device = None):
     return model, cfg, device
 
 
-def transcribe_image(model, img_path: str, device: torch.device, img_height: int = IMG_HEIGHT) -> str:
+def transcribe_image(
+    model,
+    img_path: str,
+    device: torch.device,
+    img_height: int  = IMG_HEIGHT,
+    beam_width: int  = 10,
+    blank_bonus: float = 2.0,
+    length_norm_alpha: float = 0.65,
+) -> str:
     img = Image.open(img_path).convert("L")
+    img = autocrop_whitespace(img, threshold=200, padding=2)
     w, h = img.size
     new_w = max(4, int(round(w * img_height / h)))
     img = img.resize((new_w, img_height), Image.BICUBIC)
+
     tfm = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5], std=[0.5]),
     ])
-    x = tfm(img).unsqueeze(0).to(device)   # [1, 1, H, W]
+    x = tfm(img).unsqueeze(0).to(device)
+
     with torch.no_grad():
-        log_probs = model(x)
-        _, best   = log_probs.max(2)
-    return decode_ctc(best.squeeze(1).tolist())
+        log_probs = model(x)   # [T, 1, vocab]
+
+    # Solo pasos válidos (sin padding — aquí no hay padding porque es una sola imagen)
+    valid_t = x.shape[3] // CNN_STRIDE
+    lp_np = log_probs[:valid_t].squeeze(1).cpu().float().numpy()   # [T, vocab]
+    seq   = [lp_np[t].tolist() for t in range(len(lp_np))]
+    return decode_ctc_beam(
+        seq,
+        beam_width=beam_width,
+        blank_bonus=blank_bonus,
+        length_norm_alpha=length_norm_alpha,
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("checkpoint", help="Ruta al checkpoint .pt")
-    parser.add_argument("input",      help="Imagen .png/.jpg o carpeta de imágenes")
+    parser.add_argument("checkpoint",          help="Ruta al checkpoint .pt")
+    parser.add_argument("input",               help="Imagen .png/.jpg o carpeta")
+    parser.add_argument("--beam_width",        type=int,   default=10)
+    parser.add_argument("--blank_bonus",       type=float, default=2.0,
+                        help="Bonus para blank en beam search (evita sobre-generación)")
+    parser.add_argument("--length_norm_alpha", type=float, default=0.65,
+                        help="Exponente de normalización de longitud en beam search")
     args = parser.parse_args()
 
     model, cfg, device = load_model(args.checkpoint)
@@ -70,5 +94,11 @@ if __name__ == "__main__":
     print(f"\n{'Archivo':<40} Transcripción")
     print("─" * 80)
     for p in paths:
-        text = transcribe_image(model, str(p), device, img_height=h)
+        text = transcribe_image(
+            model, str(p), device,
+            img_height=h,
+            beam_width=args.beam_width,
+            blank_bonus=args.blank_bonus,
+            length_norm_alpha=args.length_norm_alpha,
+        )
         print(f"{p.name:<40} {text}")
