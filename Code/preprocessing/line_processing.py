@@ -127,9 +127,9 @@ def detect_lines(
     cfg:    PipelineConfig,
 ) -> list[tuple[int, int]]:
     """
-    Detecta líneas por proyección horizontal con pre-dilatación.
+    Detecta líneas por proyección horizontal con pre-dilatación y corrección de overlaps.
 
-    Devuelve lista de (y_top, y_bot) ordenada de arriba a abajo.
+    Devuelve lista de (y_top, y_bot) ordenada de arriba a abajo, sin solapamientos.
     """
     H_img, W_img = binary.shape
 
@@ -172,13 +172,13 @@ def detect_lines(
     if len(proj_nonzero) == 0:
         return []
 
-    # Umbral Otsu adaptado a la proyección 1-D, cap 35% del pico
+    # Umbral Otsu adaptado a la proyección 1-D, cap 40% del pico
     p_max       = float(proj_nonzero.max())
     proj_u8     = np.clip(projection / p_max * 255, 0, 255).astype(np.uint8)
     otsu_val, _ = cv2.threshold(proj_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    otsu_thresh = min(float(otsu_val) / 255.0 * p_max, p_max * 0.35)
+    otsu_thresh = min(float(otsu_val) / 255.0 * p_max, p_max * 0.40)
     if otsu_thresh < 1.0:
-        otsu_thresh = max(1.0, W_img * 0.005)
+        otsu_thresh = max(1.0, W_img * 0.008)
 
     # Segmentación de filas activas
     active  = projection > otsu_thresh
@@ -195,12 +195,16 @@ def detect_lines(
     if in_line:
         boxes.append((y_start, len(active)))
 
-    # Fusión de segmentos próximos
+    # Fusión de segmentos próximos: usa criterios estrictos
     merge_gap = cfg.line_merge_gap
     if merge_gap > 0 and len(boxes) > 1:
         merged = [boxes[0]]
         for (t, b) in boxes[1:]:
-            if t - merged[-1][1] <= merge_gap:
+            gap = t - merged[-1][1]
+            h1 = merged[-1][1] - merged[-1][0]
+            h2 = b - t
+            should_merge = gap <= merge_gap
+            if should_merge:
                 merged[-1] = (merged[-1][0], b)
             else:
                 merged.append((t, b))
@@ -234,15 +238,41 @@ def detect_lines(
         and int((binary[t:b, :] < 128).any(axis=0).sum()) >= cfg.min_line_width
     ]
 
-    # Partir cajas sobredimensionadas (dos líneas fusionadas por un valle débil)
+    # Partir cajas sobredimensionadas
     if len(valid) >= 2:
         heights  = [b - t for t, b in valid]
         valid    = _split_oversized_boxes(valid, projection, float(np.median(heights)), cfg.min_line_height)
 
+    # NUEVO: Corrección de solapamientos
+    # Cuando dos cajas se solapan, separarlas en el punto más bajo de la proyección
+    no_overlap_boxes: list[tuple[int, int]] = []
+    for i, (yt, yb) in enumerate(valid):
+        if i == 0:
+            no_overlap_boxes.append((yt, yb))
+        else:
+            prev_yt, prev_yb = no_overlap_boxes[-1]
+            if yt < prev_yb and yt > prev_yt:
+                # Overlap! Buscar el mínimo de proyección en el rango
+                overlap_region = projection[prev_yb:yt]
+                if len(overlap_region) > 0:
+                    split_y = int(np.argmin(overlap_region) + prev_yb)
+                    # Validar que ambas mitades tienen altura mínima
+                    if (split_y - prev_yt >= cfg.min_line_height and
+                        yb - split_y >= cfg.min_line_height):
+                        no_overlap_boxes[-1] = (prev_yt, split_y)
+                        no_overlap_boxes.append((split_y, yb))
+                    else:
+                        # No se puede separar, mantener la anterior
+                        no_overlap_boxes.append((max(prev_yb, yt), yb))
+                else:
+                    no_overlap_boxes.append((max(prev_yb, yt), yb))
+            else:
+                no_overlap_boxes.append((yt, yb))
+
     # Margen superior: compensar y_top demasiado bajo en letras capitales
     top_pad = max(3, cfg.expand_no_ink_gap // 2)
     padded: list[tuple[int, int]] = []
-    for (t, b) in valid:
+    for (t, b) in no_overlap_boxes:
         prev_bot = padded[-1][1] if padded else 0
         padded.append((max(prev_bot, t - top_pad), b))
 
@@ -257,6 +287,7 @@ def expand_all_boxes(
     max_expand_frac: float = 0.80,   # conservado para compatibilidad
     no_ink_gap:      int   = 4,      # filas vacías consecutivas permitidas antes de detenerse
     min_ink_frac:    float = 0.003,
+    block_boxes:     list[tuple[int, int, int, int]] | None = None,  # [(yt, yb, xl, xr), ...] 
 ) -> list[tuple[int, int, int, int]]:
     """
     Expande cada caja (y_top, y_bot, x_left, x_right) fila a fila hasta
@@ -266,6 +297,10 @@ def expand_all_boxes(
     `no_ink_gap` controla cuántas filas vacías consecutivas se toleran antes
     de detenerse, permitiendo saltar el hueco entre el cuerpo de una letra y
     sus diacríticos (tildes, acentos, puntos de i/j…).
+    
+    Si `block_boxes` se proporciona, la expansión se limita a los límites
+    Y de cada bloque para evitar que líneas de un bloque se expandan
+    atravesando límites de bloque.
     """
     from collections import defaultdict
 
@@ -276,28 +311,60 @@ def expand_all_boxes(
     for idx, (_, _, xl, xr) in enumerate(boxes):
         col_groups[(xl, xr)].append(idx)
 
+    # Construir mapa (xl, xr) → [block limit_top, block limit_bot]
+    # para enforzar límites de bloque
+    block_limits: dict[tuple[int, int], tuple[int, int]] = {}
+    if block_boxes:
+        for block_yt, block_yb, block_xl, block_xr in block_boxes:
+            key = (block_xl, block_xr)
+            if key not in block_limits:
+                block_limits[key] = (block_yt, block_yb)
+            else:
+                # Múltiples bloques con mismo X: usar rangos union
+                prev_yt, prev_yb = block_limits[key]
+                block_limits[key] = (min(prev_yt, block_yt), max(prev_yb, block_yb))
+
     for (xl, xr), indices in col_groups.items():
         indices.sort(key=lambda i: boxes[i][0])
         local        = [boxes[i] for i in indices]
         n            = len(local)
         min_ink_cols = max(2, int((xr - xl) * min_ink_frac))
 
+        # Límites de bloque para este (xl, xr)
+        block_yt, block_yb = block_limits.get((xl, xr), (0, H_bin))
+
+        def longest_run_bool(arr: np.ndarray) -> int:
+            # returns longest contiguous True run length in 1D boolean array
+            if arr.size == 0:
+                return 0
+            max_run = cur = 0
+            for v in arr:
+                if v:
+                    cur += 1
+                    if cur > max_run:
+                        max_run = cur
+                else:
+                    cur = 0
+            return max_run
+
         def row_has_ink(y: int) -> bool:
-            return 0 <= y < H_bin and int((binary[y, xl:xr] < 128).sum()) >= min_ink_cols
+            if not (0 <= y < H_bin):
+                return False
+            row = (binary[y, xl:xr] < 128)
+            cnt = int(row.sum())
+            if cnt < min_ink_cols:
+                return False
+            # require at least a small contiguous run to avoid isolated speckles
+            lr = longest_run_bool(row)
+            return lr >= max(1, min(min_ink_cols // 3, 2))
 
         for li, orig_idx in enumerate(indices):
             yt, yb, _, _ = local[li]
-            limit_top    = (local[li - 1][1] + yt) // 2 if li > 0     else 0
-            limit_bot    = (yb + local[li + 1][0]) // 2 if li < n - 1 else H_bin
+            limit_top    = (local[li - 1][1] + yt) // 2 if li > 0     else block_yt
+            limit_bot    = (yb + local[li + 1][0]) // 2 if li < n - 1 else block_yb
 
             # Expansión hacia arriba: se busca la fila con tinta MÁS ALTA
             # dentro de [limit_top, yt), sin límite de gap consecutivos.
-            # El acento sobre una mayúscula (Ú, Í, Á…) es un componente
-            # diminuto separado del cuerpo por un hueco variable que el
-            # umbral Otsu ya ignora antes de llegar aquí (y_top queda por
-            # debajo del acento). Cortar por gap consecutivos lo perdería
-            # igualmente. El límite duro `limit_top` (punto medio con la
-            # línea anterior) garantiza que no se capture tinta ajena.
             new_top = yt
             for y in range(yt - 1, limit_top - 1, -1):
                 if row_has_ink(y):
@@ -318,6 +385,41 @@ def expand_all_boxes(
             new_bot = last_ink_row + 1
 
             result[orig_idx] = (new_top, new_bot, xl, xr)
+
+    # Post-process: fix overlaps within same X-region
+    # Itera sobre cada columna y refina overlaps reales
+    for (xl, xr), indices in col_groups.items():
+        indices.sort(key=lambda i: result[i][0])  # Sort by new_top after expansion
+        for li in range(len(indices) - 1):
+            idx_curr = indices[li]
+            idx_next = indices[li + 1]
+            yt_curr, yb_curr, _, _ = result[idx_curr]
+            yt_next, yb_next, _, _ = result[idx_next]
+            
+            # Si hay solapamiento, ajustar el límite
+            if yb_curr > yt_next:
+                overlap = yb_curr - yt_next
+                # Dividir la distancia del gap original entre los dos cuadros
+                # para minimizar fragmentación pero evitar solapamiento
+                gap_orig_curr = boxes[idx_curr][1]
+                gap_orig_next = boxes[idx_next][0]
+                gap_between = gap_orig_next - gap_orig_curr
+                
+                if gap_between > 0:
+                    # Hay un hueco original; respetar aproximadamente su punto medio
+                    midpoint = (gap_orig_curr + gap_orig_next) // 2
+                    # Ajustar el cuadro actual
+                    if yb_curr > midpoint:
+                        result[idx_curr] = (yt_curr, midpoint, xl, xr)
+                    # Ajustar el siguiente cuadro
+                    if yt_next < midpoint:
+                        result[idx_next] = (midpoint, yb_next, xl, xr)
+                else:
+                    # No hay hueco original; lines estaban pegadas
+                    # Dividir equitativamente el solapamiento
+                    mid_overlap = (yt_curr + yb_curr + yt_next + yb_next) // 4
+                    result[idx_curr] = (yt_curr, mid_overlap, xl, xr)
+                    result[idx_next] = (mid_overlap, yb_next, xl, xr)
 
     return result
 
@@ -439,3 +541,67 @@ def straighten_line(
         return binary
 
     return result
+
+
+def rotate_strip_by_baseline(
+    strip: np.ndarray,
+    n_slices: int = 0,
+    min_ink_frac: float = 0.003,
+    max_angle_deg: float = 20.0,
+) -> tuple[np.ndarray, float]:
+    """
+    Estima el ángulo medio de la línea dentro de `strip` por centroides
+    en rebanadas verticales y devuelve una versión rotada del `strip`
+    que alinea la línea aproximadamente horizontalmente.
+
+    Retorna (rotated_strip, angle_deg) donde `angle_deg` es el ángulo en
+    grados aplicado (positivo == rotate clockwise the image), y 0.0 si no
+    se aplicó rotación.
+    """
+    H, W = strip.shape[:2]
+    if H < 4 or W < 8:
+        return strip, 0.0
+
+    if n_slices <= 0:
+        n_slices = max(5, min(40, W // 80))
+    slice_w = max(1, W // n_slices)
+
+    xs = []
+    ys = []
+    row_idx = np.arange(H, dtype=np.float64)
+    for i in range(n_slices):
+        x0, x1 = i * slice_w, min((i + 1) * slice_w, W)
+        ink = (strip[:, x0:x1] < 128).astype(np.float32)
+        if ink.sum() < (x1 - x0) * H * min_ink_frac:
+            continue
+        ink_per_row = ink.sum(axis=1).astype(np.float64)
+        if ink_per_row.sum() <= 0:
+            continue
+        xs.append((x0 + x1) / 2.0)
+        ys.append(float((row_idx * ink_per_row).sum() / ink_per_row.sum()))
+
+    if len(xs) < 2:
+        return strip, 0.0
+
+    xs_arr = np.array(xs, dtype=np.float64)
+    ys_arr = np.array(ys, dtype=np.float64)
+
+    # Ajuste lineal robusto (grado 1)
+    try:
+        coeffs = np.polyfit(xs_arr, ys_arr, 1)
+    except np.linalg.LinAlgError:
+        return strip, 0.0
+    slope = float(coeffs[0])
+    angle_rad = float(np.arctan(slope))
+    angle_deg = float(np.degrees(angle_rad))
+
+    if abs(angle_deg) < 0.3 or abs(angle_deg) > max_angle_deg:
+        return strip, 0.0
+
+    # Rotar alrededor del centro para alinear baseline a horizontal
+    cx, cy = W / 2.0, H / 2.0
+    M = cv2.getRotationMatrix2D((cx, cy), -angle_deg, 1.0)
+    # calcar nuevo bounds (usar mismo tamaño para simplicidad)
+    rotated = cv2.warpAffine(strip, M, (W, H), flags=cv2.INTER_NEAREST,
+                             borderMode=cv2.BORDER_CONSTANT, borderValue=255)
+    return rotated, angle_deg

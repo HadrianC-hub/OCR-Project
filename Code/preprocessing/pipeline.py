@@ -97,8 +97,8 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
     sauvola_k      = 0.10 if m.contrast < 50 else 0.17 if m.contrast < 80 else 0.25
     global_floor_pct = 93.0 if m.contrast < 50 else 92.0 if m.contrast < 80 else 0.0
 
-    line_merge_gap    = max(4, min(15, int(m.estimated_text_h * 0.08)))
-    projection_smooth = max(3, min(9,  int(m.estimated_text_h * 0.08)))
+    line_merge_gap    = max(2, min(8, int(m.estimated_text_h * 0.04)))  # reduce merge gap for inclined text
+    projection_smooth = max(5, min(15, int(m.estimated_text_h * 0.12)))  # increase smoothing to reduce noise
     expand_no_ink_gap = max(8, int(m.estimated_text_h * 0.50))
 
     return PipelineConfig(
@@ -335,7 +335,7 @@ def segment_all(
             if col_crop.size == 0 or int((col_crop < 128).sum()) < max(5, int(col_crop.size * 0.001)):
                 continue
 
-            col_min_gap  = max(80, min(200, section_h // 12))
+            col_min_gap = max(150, min(300, section_h // 8))
             col_h_seps   = _find_h_separators(col_crop, min_gap_h=col_min_gap, threshold_frac=h_thr_frac)
             col_h_bounds = [0] + col_h_seps + [section_h]
             sub_sections = [(col_h_bounds[i], col_h_bounds[i + 1])
@@ -546,13 +546,16 @@ def _process_with_block_deskew(
     block_boxes: list[tuple[int, int, int, int]],
     cfg:         PipelineConfig,
     warns:       list[str],
-) -> tuple[list[np.ndarray], list[tuple[int, int, int, int]]]:
+)-> tuple[list[np.ndarray], list[tuple[int, int, int, int]], list[tuple[float, float, float, float, float]]]:
     """
     Para cada bloque: deskew local → re-detección de líneas → expand → straighten → normalize.
     Las coordenadas de retorno son aproximadas (no aplica rotación inversa).
     """
+    if cfg.debug:
+        print(f"[_process_with_block_deskew] Processing {len(block_boxes)} blocks")
     lines:       list[np.ndarray]               = []
     valid_boxes: list[tuple[int, int, int, int]] = []
+    oriented_boxes: list[tuple[float, float, float, float, float]] = []
     H_bin = binary.shape[0]
 
     for (by0, by1, bx0, bx1) in block_boxes:
@@ -561,9 +564,10 @@ def _process_with_block_deskew(
 
         # Padding vertical para capturar diacríticos (tildes, acentos…) que
         # sobresalen fuera del bounding-box del bloque detectado por segment_all.
-        # Se usa la mitad de la altura del bloque como margen.
+        # Reducimos la fracción de altura utilizada para padding para evitar
+        # incluir líneas adyacentes en documentos densos.
         block_h = by1 - by0
-        pad_v   = max(cfg.expand_no_ink_gap, block_h // 2)
+        pad_v = min(max(cfg.expand_no_ink_gap, block_h // 8), 30)
         crop_y0 = max(0,     by0 - pad_v)
         crop_y1 = min(H_bin, by1 + pad_v)
 
@@ -573,7 +577,7 @@ def _process_with_block_deskew(
 
         rotated, angle = deskew_block(crop, max_angle=cfg.deskew_block_max_angle)
         if cfg.debug and abs(angle) > 0.3:
-            print(f"  [deskew_blocks] y=[{by0},{by1}] x=[{bx0},{bx1}] → {angle:.2f}°")
+            print(f"  [deskew_blocks] y=[{by0},{by1}] x=[{bx0},{bx1}] -> {angle:.2f} deg")
 
         line_ys = detect_lines(rotated, cfg)
         if not line_ys:
@@ -605,8 +609,10 @@ def _process_with_block_deskew(
             #     anterior, produciendo manchas en las imágenes individuales.
             #   · Hacia abajo   → safe_y1 ajustado al bloque + accent_margin.
             #     Evita que la última línea sangre hasta el bloque siguiente.
-            accent_margin = cfg.expand_no_ink_gap
-            safe_y0 = max(0, block_top_in_crop - accent_margin)  # fix: no llegar a y=0
+            # Usar un margen seguro dentro del crop para evitar recortar
+            # trazos desplazados por la rotación/enderezado.
+            accent_margin = min(pad_v, rotated.shape[0] // 2)
+            safe_y0 = max(0, block_top_in_crop - accent_margin)
             safe_y1 = min(rotated.shape[0], block_bot_in_crop + accent_margin)
             safe_crop     = rotated[safe_y0:safe_y1, :]
             boxes_in_safe = [(yt - safe_y0, yb - safe_y0, xl, xr)
@@ -621,9 +627,39 @@ def _process_with_block_deskew(
                            for (yt, yb, xl, xr) in expanded]
 
         for (yt, yb, xl, xr) in boxes_local:
-            strip = rotated[yt:yb, xl:xr]
+            orig_strip = rotated[yt:yb, xl:xr]
+            strip = orig_strip
             if strip.size == 0:
                 continue
+            # Primero intentar recortar orientado según la baseline local
+            ang = 0.0
+            if getattr(cfg, 'use_oriented_crop', False):
+                try:
+                    from preprocessing.line_processing import rotate_strip_by_baseline
+                    rstrip, ang = rotate_strip_by_baseline(strip, n_slices=cfg.straighten_slices)
+                    if rstrip is not None and rstrip.size > 0:
+                        # reemplazar strip por la versión rotada para normalizar
+                        strip_was_rotated = (rstrip is not strip)  # True if rotation occurred
+                        strip = rstrip
+                        if cfg.debug and abs(ang) > 0.05:  # lowered threshold from 0.1 to catch more
+                            try:
+                                dbg_dir = Path(cfg.debug_dir)
+                                dbg_dir.mkdir(parents=True, exist_ok=True)
+                                name = f"rotated_block_by_{by0}_{bx0}_yt_{yt}.png"
+                                ok, buf = cv2.imencode('.png', strip)
+                                if ok:
+                                    (dbg_dir / name).write_bytes(buf.tobytes())
+                                    if cfg.debug:
+                                        print(f"  [rotate] angle={ang:.2f} deg -> saved")
+                            except Exception as e:
+                                if cfg.debug:
+                                    print(f"  [rotate] angle={ang:.2f}° but save failed: {e}")
+                        elif cfg.debug:
+                            print(f"  [rotate] angle={ang:.2f}° (not saved, threshold < 0.05)")
+                except Exception as e:
+                    ang = 0.0
+                    if cfg.debug:
+                        print(f"  [rotate] exception: {e}")
             if cfg.straighten_lines:
                 strip = straighten_line(strip, poly_degree=cfg.straighten_poly,
                                         n_slices=cfg.straighten_slices)
@@ -636,10 +672,44 @@ def _process_with_block_deskew(
             if float((norm < 0.5).mean()) < 0.02:
                 continue
             lines.append(norm)
-            # Las coordenadas se expresan respecto al origen de la imagen original.
-            valid_boxes.append((crop_y0 + yt, crop_y0 + yb, bx0, bx1))
+            # Ajustar las coordenadas de la caja según la tinta real en el
+            # `strip` resultante (puede haberse desplazado verticalmente al
+            # enderezar). Las coordenadas se expresan respecto al origen de
+            # la imagen original.
+            rows = np.where((strip < 128).any(axis=1))[0]
+            if rows.size == 0:
+                continue
+            new_top = int(rows[0])
+            new_bot = int(rows[-1]) + 1
+            # Conservativamente expandir la caja original verticalmente para
+            # cubrir posibles desplazamientos por rotación aplicada.
+            try:
+                vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * strip.shape[1] / 2.0))
+            except Exception:
+                vert_pad = 0
+            g_top = max(0, crop_y0 + yt + new_top - vert_pad)
+            g_bot = min(H_bin, crop_y0 + yt + new_bot + vert_pad)
+            g_left = bx0 + xl
+            g_right = bx0 + xr
+            valid_boxes.append((g_top, g_bot, g_left, g_right))
+            # Calcular bounding-rotado (minAreaRect) sobre la tinta de la
+            # franja ORIGINAL (antes de rotar). Esto asegura que las
+            # coordenadas del rectángulo se mapeen correctamente al sistema
+            # de coordenadas global de la imagen.
+            try:
+                pts = np.column_stack(np.where(orig_strip < 128))
+                if pts.shape[0] >= 3:
+                    pts_xy = pts[:, ::-1].astype(np.float32)
+                    rect = cv2.minAreaRect(pts_xy)
+                    (cx, cy), (w, h), ang_rect = rect
+                    # convertir centro a coordenadas globales
+                    g_cx = g_left + float(cx)
+                    g_cy = g_top + float(cy)
+                    oriented_boxes.append((g_cx, g_cy, float(w), float(h), float(ang_rect)))
+            except Exception:
+                pass
 
-    return lines, valid_boxes
+    return lines, valid_boxes, oriented_boxes
 
 
 # 5. ORQUESTADOR PRINCIPAL
@@ -697,8 +767,9 @@ def run(
         return PipelineResult(lines=[], line_boxes=[], block_boxes=block_boxes,
                               binary=binary, warnings=warns, config_used=cfg)
 
+    oriented_boxes: list[tuple[float, float, float, float, float]] = []
     if cfg.deskew_blocks and block_boxes:
-        lines, valid_boxes = _process_with_block_deskew(binary, block_boxes, cfg, warns)
+        lines, valid_boxes, oriented_boxes = _process_with_block_deskew(binary, block_boxes, cfg, warns)
         if not lines:
             warns.append("deskew_blocks activo pero no se extrajeron líneas.")
     else:
@@ -708,12 +779,35 @@ def run(
                 max_expand_frac=cfg.expand_max_frac,
                 no_ink_gap=cfg.expand_no_ink_gap,
                 min_ink_frac=cfg.expand_min_ink_frac,
+                block_boxes=block_boxes,
             )
         lines, valid_boxes = [], []
+        oriented_boxes = []
         for (y_top, y_bot, x_left, x_right) in boxes_4d:
             strip = binary[y_top:y_bot, x_left:x_right]
             if strip.size == 0:
                 continue
+            # Intentar recortar orientado por baseline antes de enderezar
+            ang = 0.0
+            if getattr(cfg, 'use_oriented_crop', False):
+                try:
+                    from preprocessing.line_processing import rotate_strip_by_baseline
+                    rstrip, ang = rotate_strip_by_baseline(strip, n_slices=cfg.straighten_slices)
+                    if rstrip is not None and rstrip.size > 0:
+                        strip = rstrip
+                        if cfg.debug and abs(ang) > 0.1:
+                            try:
+                                dbg_dir = Path(cfg.debug_dir)
+                                dbg_dir.mkdir(parents=True, exist_ok=True)
+                                name = f"rotated_line_{y_top}_{x_left}.png"
+                                ok, buf = cv2.imencode('.png', strip)
+                                if ok:
+                                    (dbg_dir / name).write_bytes(buf.tobytes())
+                                print(f"  [debug] rotated line strip saved: {dbg_dir / name} angle={ang:.2f}")
+                            except Exception:
+                                pass
+                except Exception:
+                    ang = 0.0
             if cfg.straighten_lines:
                 strip = straighten_line(strip, poly_degree=cfg.straighten_poly,
                                         n_slices=cfg.straighten_slices)
@@ -726,13 +820,40 @@ def run(
             if float((norm < 0.5).mean()) < 0.02:
                 continue
             lines.append(norm)
-            valid_boxes.append((y_top, y_bot, x_left, x_right))
+            # Ajustar caja según tinta real en `strip` tras enderezar
+            rows = np.where((strip < 128).any(axis=1))[0]
+            if rows.size == 0:
+                continue
+            new_top = int(rows[0])
+            new_bot = int(rows[-1]) + 1
+            # Conservatively expand vertical by margin based on rotation angle
+            try:
+                vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * strip.shape[1] / 2.0))
+            except Exception:
+                vert_pad = 0
+            g_top = max(0, y_top + new_top - vert_pad)
+            g_bot = min(binary.shape[0], y_top + new_bot + vert_pad)
+            g_left = x_left
+            g_right = x_left + strip.shape[1]
+            valid_boxes.append((g_top, g_bot, g_left, g_right))
+            # compute oriented minAreaRect for this strip
+            try:
+                pts = np.column_stack(np.where(strip < 128))
+                if pts.shape[0] >= 3:
+                    pts_xy = pts[:, ::-1].astype(np.float32)
+                    rect = cv2.minAreaRect(pts_xy)
+                    (cx, cy), (w, h), ang = rect
+                    g_cx = g_left + float(cx)
+                    g_cy = g_top + float(cy)
+                    oriented_boxes.append((g_cx, g_cy, float(w), float(h), float(ang)))
+            except Exception:
+                pass
 
     if cfg.debug:
         _save_debug(gray, binary, valid_boxes, block_boxes, cfg.debug_dir)
 
     return PipelineResult(lines=lines, line_boxes=valid_boxes, block_boxes=block_boxes,
-                          binary=binary, warnings=warns, config_used=cfg)
+                          oriented_boxes=oriented_boxes, binary=binary, warnings=warns, config_used=cfg)
 
 
 # 6. DEBUG

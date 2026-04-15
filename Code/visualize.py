@@ -45,11 +45,12 @@ def _sep(char: str = "─", w: int = 60) -> str:
 # Generación de imágenes
 
 def vis_lines_detected(
-    binary:      np.ndarray,
-    line_boxes:  list,
-    block_boxes: list,
-    out:         Path,
-    prefix:      str = "",
+    binary:         np.ndarray,
+    line_boxes:     list,
+    block_boxes:    list,
+    out:            Path,
+    prefix:         str = "",
+    oriented_boxes: list = None,
 ) -> None:
     """Dibuja bounding-boxes de bloques y líneas sobre la imagen binarizada."""
     vis = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
@@ -62,11 +63,32 @@ def vis_lines_detected(
         cv2.putText(vis, f"B{bi+1}", (bx_l + 4, by_top + 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, bc, 2)
 
-    for i, (y_top, y_bot, x_left, x_right) in enumerate(line_boxes):
+    for i, lb in enumerate(line_boxes):
         color = PALETTE[i % len(PALETTE)]
-        cv2.rectangle(vis, (x_left, y_top), (x_right, y_bot), color, 2)
-        cv2.putText(vis, f"L{i+1}", (x_left + 6, max(20, y_top + 18)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        if isinstance(lb, (list, tuple)) and len(lb) == 4:
+            y_top, y_bot, x_left, x_right = lb
+            cv2.rectangle(vis, (x_left, y_top), (x_right, y_bot), color, 2)
+            cv2.putText(vis, f"L{i+1}", (x_left + 6, max(20, y_top + 18)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+        else:
+            # unknown format — skip
+            continue
+
+    # Dibujar cajas orientadas si están disponibles
+    if oriented_boxes:
+        for i, ob in enumerate(oriented_boxes):
+            try:
+                cx, cy, w, h, ang = ob
+                box = cv2.boxPoints(((float(cx), float(cy)), (float(w), float(h)), float(ang)))
+                box = np.int0(box)
+                color = PALETTE[(i + 2) % len(PALETTE)]
+                cv2.polylines(vis, [box], True, color, 2)
+                # put label near top-left of bounding rect
+                tl = tuple(box.min(axis=0))
+                cv2.putText(vis, f"R{i+1}", (int(tl[0]) + 6, int(tl[1]) + 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+            except Exception:
+                continue
 
     summ = f"{len(line_boxes)} lineas  |  {len(block_boxes)} bloques"
     cv2.putText(vis, summ, (10, H - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 0),       3)
@@ -139,6 +161,52 @@ def save_line_crops(
         saved += 1
         if fixed_name:
             break
+    return saved
+
+
+def save_rotated_line_crops(
+    img_bgr: np.ndarray,
+    oriented_boxes: list,
+    out: Path,
+) -> int:
+    """Guarda recortes rotados según `oriented_boxes`.
+
+    `oriented_boxes` es lista de tuplas (cx, cy, w, h, angle)
+    retornadas por `cv2.minAreaRect` (centro en coordenadas de imagen,
+    anchura, altura y ángulo en grados).
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    if img_bgr is None or oriented_boxes is None:
+        return 0
+    for i, ob in enumerate(oriented_boxes, 1):
+        try:
+            cx, cy, w, h, ang = ob
+            if w <= 0 or h <= 0:
+                continue
+            # cv2.getRotationMatrix2D rotates around center; build matrix
+            M = cv2.getRotationMatrix2D((cx, cy), ang, 1.0)
+            H_img, W_img = img_bgr.shape[:2]
+            rotated = cv2.warpAffine(img_bgr, M, (W_img, H_img), flags=cv2.INTER_LINEAR,
+                                     borderMode=cv2.BORDER_CONSTANT, borderValue=(255,255,255))
+            # crop centered at (cx,cy) with size (w,h)
+            w_i, h_i = int(round(w)), int(round(h))
+            x0 = int(round(cx - w_i / 2.0))
+            y0 = int(round(cy - h_i / 2.0))
+            x1 = x0 + w_i
+            y1 = y0 + h_i
+            x0c, y0c = max(0, x0), max(0, y0)
+            x1c, y1c = min(W_img, x1), min(H_img, y1)
+            crop = rotated[y0c:y1c, x0c:x1c]
+            if crop.size == 0:
+                continue
+            name = f"rot_crop_{i:03d}.jpg"
+            ok, buf = cv2.imencode('.jpg', crop)
+            if ok:
+                (out / name).write_bytes(buf.tobytes())
+                saved += 1
+        except Exception:
+            continue
     return saved
 
 
@@ -272,8 +340,14 @@ def run_and_visualize(
         print(f"  [OK]   {n_saved} líneas → {stem}.jpg")
     else:
         lines_dir = out / stem
-        vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
+        vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_", oriented_boxes=getattr(result, 'oriented_boxes', None))
         n_saved = save_line_crops(binary, result.line_boxes, lines_dir)
+        # Guardar también recortes rotados si el pipeline devolvió oriented_boxes
+        orients = getattr(result, 'oriented_boxes', None)
+        if orients:
+            n_rot = save_rotated_line_crops(img_bgr, orients, lines_dir)
+            if n_rot > 0:
+                print(f"  [OK]   {n_rot} recortes rotados → {lines_dir}")
         print(f"  [OK]   {n_saved} líneas → {stem}/line_NNN.jpg")
     print()
     print(_sep("═"))

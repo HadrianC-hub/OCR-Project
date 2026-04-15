@@ -54,7 +54,7 @@ class PipelineConfig:
     deskew_block_max_angle: float = 15.0
 
     # Segmentación de líneas
-    min_line_height:   int  = 20
+    min_line_height:   int  = 24  # altura mínima; 24 es balance entre evitar fragmentación e incluir líneas pequeñas
     min_line_width:    int  = 20
     line_merge_gap:    int  = 4
     projection_smooth: int  = 3
@@ -67,8 +67,8 @@ class PipelineConfig:
     # Expansión de caja
     expand_to_ink:       bool  = True
     expand_max_frac:     float = 0.80
-    expand_no_ink_gap:   int   = 20
-    expand_min_ink_frac: float = 0.0005
+    expand_no_ink_gap:   int   = 6
+    expand_min_ink_frac: float = 0.002
 
     # Enderezado per-línea
     straighten_lines:  bool = True
@@ -92,13 +92,15 @@ class PipelineConfig:
     min_component_area:            int   = 0
     use_adaptive_component_filter: bool  = False
     use_remove_bg:                 bool  = False
+    # Extra: usar recortes orientados (rotated rectangles) por línea
+    use_oriented_crop:             bool  = True
 
     # Fusión de bloques
     para_split_factor: float = 2.5
     block_merge_gap:   int   = 0
 
     # Control
-    debug:     bool = False
+    debug:     bool = True
     debug_dir: str  = "debug_pipeline"
 
 
@@ -109,6 +111,7 @@ class PipelineResult:
     lines:       list[np.ndarray]
     line_boxes:  list[tuple[int, int, int, int]]
     block_boxes: list[tuple[int, int, int, int]] = field(default_factory=list)
+    oriented_boxes: list[tuple[float, float, float, float, float]] = field(default_factory=list)
     binary:      Optional[np.ndarray]            = None
     n_lines:     int                             = 0
     warnings:    list[str]                       = field(default_factory=list)
