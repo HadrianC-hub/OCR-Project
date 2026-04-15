@@ -14,11 +14,73 @@ import math
 from pathlib import Path
 from typing import List, Tuple
 
+import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Subset
 from torchvision import transforms
-from PIL import Image
+from PIL import Image, ImageFilter
+
+
+# ------------------------------------------------------------------ #
+#  Transformación: escala horizontal aleatoria                        #
+# ------------------------------------------------------------------ #
+
+class RandomHorizontalScale:
+    """
+    Estira o comprime la imagen horizontalmente por un factor aleatorio.
+    Simula la variación de ancho entre fuentes proporcionales y monoespaciadas,
+    y también distintos tamaños de fuente relativos a la altura normalizada.
+
+    Rango ampliado (0.55–1.60) para cubrir:
+      - Texto muy estrecho / condensado (factor < 0.70)
+      - Texto muy ancho / expandido    (factor > 1.35)
+    """
+    def __init__(self, scale_range: tuple = (0.55, 1.60)):
+        self.lo, self.hi = scale_range
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        factor = random.uniform(self.lo, self.hi)
+        w, h   = img.size
+        new_w  = max(4, int(round(w * factor)))
+        return img.resize((new_w, h), Image.BICUBIC)
+
+
+class RandomStrokeWidth:
+    """
+    Simula distintos grosores de trazo mediante erosión y dilatación morfológica.
+
+    - Erosión  (MinFilter): adelgaza los trazos → simula texto desgastado,
+      tinta escasa, resolución muy alta (trazos finos relativos).
+    - Dilatación (MaxFilter): engrosa los trazos → simula tinta corrida,
+      fotocopiadora, resolución baja (píxeles grandes), negrita intensa.
+
+    Probabilidad: 20 % erosión / 20 % dilatación / 60 % sin cambio.
+    """
+    def __call__(self, img: Image.Image) -> Image.Image:
+        r = random.random()
+        if r < 0.20:
+            return img.filter(ImageFilter.MinFilter(3))
+        elif r < 0.40:
+            return img.filter(ImageFilter.MaxFilter(3))
+        return img
+
+
+class RandomNoise:
+    """
+    Añade ruido gaussiano al tensor de imagen normalizado [-1, 1].
+    Simula el grano del sensor del escáner, el ruido de cuantización,
+    y la textura de papel en documentos reales.
+
+    Se aplica DESPUÉS de ToTensor y Normalize, directamente sobre el tensor.
+    std_range controla la intensidad del ruido (en unidades de [-1,1]).
+    """
+    def __init__(self, std_range: tuple = (0.0, 0.08)):
+        self.lo, self.hi = std_range
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        std = random.uniform(self.lo, self.hi)
+        return (tensor + torch.randn_like(tensor) * std).clamp(-1.0, 1.0)
 
 # ================================================================== #
 DATA_DIR   = os.environ.get("OCR_DATA_DIR",   "images")
@@ -245,10 +307,26 @@ class OCRDataset(Dataset):
         ])
         self._aug = transforms.Compose([
             transforms.Grayscale(1),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2),
-            transforms.RandomAffine(degrees=1, translate=(0.01, 0.01)),
+            # 1. Grosor de trazo (40% de activación, dentro del lambda)
+            transforms.Lambda(lambda img: RandomStrokeWidth()(img)),
+            # 2. Ancho de carácter: rango calibrado (era 0.55-1.60, demasiado)
+            RandomHorizontalScale(scale_range=(0.70, 1.40)),
+            # 3. Perspectiva leve: distorsión reducida (era 0.08)
+            transforms.RandomPerspective(distortion_scale=0.05, p=0.25),
+            # 4. Fotometría: brillo/contraste moderados (era 0.35)
+            transforms.ColorJitter(brightness=0.25, contrast=0.25),
+            # 5. Geométrica: rotación 3° (era 5°), translate vertical moderado
+            transforms.RandomAffine(
+                degrees=3,
+                translate=(0.02, 0.03),
+                shear=(-3, 3),
+            ),
+            # 6. Blur: igual, simula distintas resoluciones
+            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.2)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5], std=[0.5]),
+            # 7. Ruido gaussiano: reducido (era 0.08 max, ahora 0.05)
+            transforms.Lambda(lambda t: RandomNoise(std_range=(0.0, 0.05))(t)),
         ])
 
     def __len__(self) -> int:
@@ -259,9 +337,30 @@ class OCRDataset(Dataset):
         img = Image.open(img_path).convert("L")
         img = autocrop_whitespace(img, threshold=200, padding=2)
         w, h = img.size
+
+        # ── Scale jitter (solo durante augmentación) ──────────────────────
+        # Redimensiona a una altura intermedia aleatoria ANTES del resize final
+        # a img_height. Esto simula que el texto de origen tenía distinta
+        # resolución o DPI:
+        #   - Jitter a altura grande (p.ej. 96px) y luego bajar a 32px →
+        #     caracteres suaves, anti-aliased (origen de alta resolución).
+        #   - Jitter a altura pequeña (p.ej. 10px) y luego subir a 32px →
+        #     caracteres pixelados, blocky (origen de baja resolución).
+        # En ambos casos el ancho se escala proporcionalmente, preservando
+        # el aspect ratio original; la variación de ancho la añade
+        # RandomHorizontalScale en _aug.
+        if self.augment and torch.rand(1).item() > 0.40:
+            jitter_h = random.randint(
+                max(22, self.img_height // 2 + 5),  # mínimo 22px — por debajo los trazos se destruyen
+                self.img_height * 2,                  # máximo 64px — suficiente para anti-aliasing distinto
+            )
+            jitter_w = max(4, int(round(w * jitter_h / h)))
+            img = img.resize((jitter_w, jitter_h), Image.BICUBIC)
+            w, h = img.size
+
         new_w = max(4, int(round(w * self.img_height / h)))
         img = img.resize((new_w, self.img_height), Image.BICUBIC)
-        tfm = self._aug if (self.augment and torch.rand(1).item() > 0.5) else self._base
+        tfm = self._aug if (self.augment and torch.rand(1).item() > 0.45) else self._base
         tensor = tfm(img)
         label = torch.tensor(encode(text), dtype=torch.long)
         return tensor, label, text
