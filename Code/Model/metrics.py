@@ -1,19 +1,5 @@
 """
-metrics.py  —  Métricas OCR + Tests estadísticos para validación en tesis
-
-Secciones:
-  1. Métricas clásicas (CER, WER, NED, BLEU, P/R/F1)  — sin cambios
-  2. Tests estadísticos:
-       bootstrap_ci          — IC 95 % por remuestreo (10 000 iter.)
-       shapiro_wilk          — normalidad de la distribución de CER
-       binomial_exact        — LineAcc vs clasificador aleatorio H₀=0.5
-       mcnemar_test          — greedy vs beam en corrección por línea
-       wilcoxon_signed_rank  — CER greedy vs beam por muestra
-       kruskal_wallis        — CER igual entre fuentes tipográficas?
-       mannwhitney_posthoc   — pares de fuentes con corrección Bonferroni
-       char_confusion_top_n  — top-N errores carácter con traceback
-  3. compute_statistical_report — todo en uno, devuelve dict serializable
-  4. print_statistical_report   — impresión formateada para consola/tesis
+metrics.py  —  Métricas OCR y tests estadísticos para validación experimental.
 """
 
 from typing import List, Tuple, Dict
@@ -21,11 +7,12 @@ from collections import Counter, defaultdict
 import math
 
 
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  1. MÉTRICAS CLÁSICAS
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 def _levenshtein_ops(a: List, b: List) -> Tuple[int, int, int, int]:
+    """Distancia de Levenshtein con conteo de operaciones (S, I, D)."""
     m, n = len(a), len(b)
     INF = (10**9, 0, 0, 0)
     prev = [(j, 0, j, 0) for j in range(n + 1)]
@@ -264,9 +251,9 @@ def print_metrics(metrics: Dict, title: str = "Evaluación") -> None:
     print(f"{'═'*60}\n")
 
 
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  2. TESTS ESTADÍSTICOS
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 def _require_scipy():
     try:
@@ -311,9 +298,9 @@ def shapiro_wilk(values, max_n: int = 5_000, seed: int = 1) -> dict:
         arr = arr[rng.choice(len(arr), max_n, replace=False)]
     stat, p = st.shapiro(arr)
     return {
-        "statistic":       float(stat),
-        "p_value":         float(p),
-        "n_used":          len(arr),
+        "statistic":         float(stat),
+        "p_value":           float(p),
+        "n_used":            len(arr),
         "is_normal_alpha05": bool(p >= 0.05),
     }
 
@@ -341,8 +328,8 @@ def binomial_exact(n_correct: int, n_total: int, p0: float = 0.5) -> dict:
 def mcnemar_test(correct_a, correct_b) -> dict:
     """
     Test de McNemar con corrección de continuidad de Edwards (b+c < 25).
-    H₀: ambos clasificadores cometen el mismo número de errores.
-    correct_a[i], correct_b[i] ∈ {0,1}  (1 = línea perfecta).
+    H₀: ambos decoders cometen el mismo número de errores a nivel de línea.
+    correct_a[i], correct_b[i] ∈ {0, 1}  (1 = línea transcrita perfectamente).
     """
     st, np = _require_scipy()
     ca = np.asarray(correct_a, dtype=int)
@@ -389,7 +376,7 @@ def wilcoxon_signed_rank(values_a, values_b) -> dict:
 def kruskal_wallis(groups: dict) -> dict:
     """
     Test de Kruskal-Wallis sobre grupos (dict {nombre: [valores]}).
-    H₀: igual distribución en todos los grupos.
+    H₀: igual distribución de CER en todos los grupos (fuentes tipográficas).
     """
     st, np = _require_scipy()
     valid = {k: np.asarray(v, dtype=float) for k, v in groups.items() if len(v) > 1}
@@ -430,7 +417,7 @@ def mannwhitney_posthoc(groups: dict, alpha: float = 0.05) -> list:
 def char_confusion_top_n(hyps: List[str], refs: List[str], top_n: int = 20) -> list:
     """
     Top-N errores de carácter con traceback de Levenshtein.
-    Solo procesa pares donde hyp ≠ ref (eficiente con CER muy bajo).
+    Solo procesa pares donde hyp ≠ ref (eficiente con CER bajo).
     """
     subs = Counter()
     dels = Counter()
@@ -470,9 +457,9 @@ def char_confusion_top_n(hyps: List[str], refs: List[str], top_n: int = 20) -> l
     return result
 
 
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  3. INFORME ESTADÍSTICO COMPLETO
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 def compute_statistical_report(
     hyps_greedy:  List[str],
@@ -549,12 +536,11 @@ def compute_statistical_report(
     return report
 
 
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  4. IMPRESIÓN FORMATEADA
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 def print_statistical_report(report: dict) -> None:
-    """Imprime el informe estadístico completo en consola."""
     _, np = _require_scipy()
 
     def _sep(c="─"): print(c * 66)
@@ -562,7 +548,6 @@ def print_statistical_report(report: dict) -> None:
 
     N = report["n_samples"]
 
-    # ── Bootstrap ──────────────────────────────────────────────────
     nb = report["bootstrap"]["CER_greedy"]["n_bootstrap"]
     _hdr(f"BOOTSTRAP IC 95 %  (n_bootstrap = {nb:,})")
     print(f"\n  {'Métrica':<22} {'Media':>9} {'Std':>9} {'IC95 bajo':>11} {'IC95 alto':>11}")
@@ -578,7 +563,6 @@ def print_statistical_report(report: dict) -> None:
         print(f"  {label:<22} {b['mean']:>9.6f} {b['std']:>9.6f} "
               f"{b['ci_low']:>11.6f} {b['ci_high']:>11.6f}")
 
-    # ── Shapiro-Wilk ───────────────────────────────────────────────
     _hdr("TEST DE SHAPIRO-WILK — NORMALIDAD DEL CER")
     print(f"\n  H₀: la distribución de CER por muestra es normal")
     print(f"\n  {'Decoder':<12} {'W':>10} {'p-valor':>12}  Conclusión")
@@ -592,7 +576,6 @@ def print_statistical_report(report: dict) -> None:
            else "paramétricos o no-paramétricos"
     print(f"\n  → Tests recomendados: {rec}")
 
-    # ── Binomial ───────────────────────────────────────────────────
     _hdr("TEST BINOMIAL EXACTO — LINE ACCURACY (GREEDY)")
     b = report["binomial"]
     print(f"\n  H₀: P(línea correcta) = {b['p0_null']}  (clasificador aleatorio)")
@@ -604,7 +587,6 @@ def print_statistical_report(report: dict) -> None:
     conc = "Rechazar H₀  (p < 0.001)" if b["reject_H0_alpha001"] else "No rechazar H₀"
     print(f"  Conclusión       : {conc}")
 
-    # ── McNemar ────────────────────────────────────────────────────
     _hdr("TEST DE McNEMAR — GREEDY vs BEAM (LINE ACCURACY)")
     m = report["mcnemar"]
     if "note" in m and m.get("note") == "sin_discordancias":
@@ -619,7 +601,6 @@ def print_statistical_report(report: dict) -> None:
                else "Sin diferencia significativa"
         print(f"  Conclusión             : {conc}  (α = 0.05)")
 
-    # ── Wilcoxon ───────────────────────────────────────────────────
     _hdr("TEST DE WILCOXON SIGNED-RANK — CER GREEDY vs BEAM")
     w = report["wilcoxon"]
     if "note" in w:
@@ -636,7 +617,6 @@ def print_statistical_report(report: dict) -> None:
                else "Sin diferencia significativa"
         print(f"  Conclusión     : {conc}  (α = 0.05)")
 
-    # ── Análisis por fuente ────────────────────────────────────────
     fa = report.get("font_analysis", {})
     if "note" not in fa:
         _hdr("ANÁLISIS POR FUENTE TIPOGRÁFICA")
@@ -670,7 +650,6 @@ def print_statistical_report(report: dict) -> None:
                 sig  = "✓" if r["significant"] else "✗"
                 print(f"  {pair:<48} {r['U']:>10.1f} {r['p_value']:>12.4e} {sig:>6}")
 
-    # ── Errores de carácter ────────────────────────────────────────
     _hdr("TOP ERRORES A NIVEL DE CARÁCTER (GREEDY)")
     errors = report.get("char_errors", [])
     if errors:

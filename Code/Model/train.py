@@ -1,23 +1,3 @@
-"""
-train.py  —  Entrenamiento CRNN+CTC + Evaluación estadística completa
-
-Al finalizar el entrenamiento principal ejecuta automáticamente:
-  ✓ Evaluación greedy + beam sobre el mejor modelo
-  ✓ Bootstrap IC 95 % (10 000 remuestras) para CER, WER, LineAcc, CharF1
-  ✓ Test de Shapiro-Wilk sobre la distribución de CER
-  ✓ Test binomial exacto para LineAcc (H₀: P = 0.5)
-  ✓ Test de McNemar (greedy vs beam, por línea)
-  ✓ Test de Wilcoxon signed-rank (CER greedy vs beam, por muestra)
-  ✓ Kruskal-Wallis + Mann-Whitney post-hoc por fuente tipográfica
-  ✓ Top-20 errores de carácter con traceback de Levenshtein
-  ✓ JSON con todos los resultados estadísticos
-
-Opcional (flags):
-  --cv_folds N    Validación cruzada k-fold estratificada por fuente
-  --lofo          Leave-One-Font-Out (generalización a fuentes nuevas)
-  --n_bootstrap N Iteraciones de bootstrap (default 10 000)
-"""
-
 import os
 import sys
 import json
@@ -31,67 +11,122 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset, random_split
 
 from model   import CRNN
-from dataset import (OCRDataset, NoAugSubset, collate_fn,
+from dataset import (OCRDataset, NoAugSubset, BucketBatchSampler, collate_fn,
                      decode_ctc, decode_ctc_beam,
                      BLANK_IDX, IMG_HEIGHT, get_font_label)
 from metrics import (compute_all_metrics, print_metrics,
                      compute_statistical_report, print_statistical_report)
 
 
-# ================================================================== #
+# ======================================================================
 #  CONFIGURACIÓN
-# ================================================================== #
+# ======================================================================
 DATASET_NAME = "tu-dataset"
 
 CONFIG = {
-    # ---- Rutas ----
+    # Rutas
     "data_dir":       f"/kaggle/input/{DATASET_NAME}/images",
     "vocab_path":     f"/kaggle/input/{DATASET_NAME}/vocab/vocab.txt",
     "checkpoint_dir": "/kaggle/working/checkpoints",
     "history_path":   "/kaggle/working/training_history.json",
 
-    # ---- Imagen ----
+    # Imagen
     "img_height": IMG_HEIGHT,
 
-    # ---- Modelo ----
+    # Modelo
     "hidden_size": 256,
     "num_layers":  2,
     "vocab_size":  101,
     "dropout":     0.2,
 
-    # ---- Entrenamiento ----
-    "epochs":       40,
-    "batch_size":   96,
+    # Entrenamiento
+    "epochs":       35,
+    "batch_size":   32,
     "lr":           3e-4,
     "weight_decay": 1e-4,
     "val_split":    0.1,
     "grad_clip":    5.0,
 
-    # ---- GPU ----
+    # GPU
     "use_amp":         True,
-    "num_workers":     4,
-    "prefetch_factor": 4,
+    "num_workers":     2,
+    "prefetch_factor": 2,
 
-    # ---- Decodificación ----
+    # Decodificación
     "beam_width":  10,
     "beam_bonus":  2.0,
     "beam_alpha":  0.65,
 
-    # ---- Estadística ----
-    "n_bootstrap": 10_000,   # remuestras bootstrap
-    "cv_folds":    0,         # 0 = desactivado; N > 1 = k-fold CV
-    "cv_epochs":   25,        # épocas por fold en CV (< epochs para ahorrar tiempo)
-    "lofo":        False,     # Leave-One-Font-Out
-    "lofo_epochs": 25,        # épocas por iteración en LOFO
+    # KenLM
+    "corpus_dir":  f"/kaggle/input/{DATASET_NAME}/Corpus",
+    "lm_path":     "/kaggle/working/lm_5gram.arpa",
+    "lm_alpha_lm": 0.4,
 
-    # ---- Checkpoints ----
+    # Estadística
+    "n_bootstrap": 10_000,
+    "cv_folds":    0,
+    "cv_epochs":   10,
+    "lofo":        False,
+    "lofo_epochs": 10,
+
+    # Si True, salta el beam search en la evaluación final del entrenamiento
+    # principal. El beam empeora en este modelo (CER 0.0102 → 0.0172)
+    # y tarda ~13 min extra.
+    "skip_beam_final": True,
+
+    # Checkpoints
     "save_every": 5,
     "resume":     True,
 }
-# ================================================================== #
+# ======================================================================
 
 
-# ── Utilidades generales ─────────────────────────────────────────────
+# --- KenLM ---
+
+def build_lm(corpus_dir: str, lm_path: str, order: int = 5) -> bool:
+    import subprocess
+    import tempfile
+
+    corpus = Path(corpus_dir)
+    if not corpus.exists():
+        print(f"[LM] corpus_dir no encontrado: {corpus_dir} — omitiendo build_lm")
+        return False
+
+    txt_files = sorted(corpus.glob("**/*.txt"))
+    if not txt_files:
+        print(f"[LM] No se encontraron .txt en {corpus_dir} — omitiendo build_lm")
+        return False
+
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
+        combined = fh.name
+        for f in txt_files:
+            fh.write(f.read_text(encoding="utf-8", errors="replace"))
+            fh.write("\n")
+
+    print(f"[LM] Entrenando modelo {order}-gram con {len(txt_files)} archivos → {lm_path}")
+    cmd = f"lmplz -o {order} --discount_fallback < {combined} > {lm_path}"
+    ret = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if ret.returncode != 0:
+        print(f"[LM] lmplz falló:\n{ret.stderr}")
+        return False
+    print(f"[LM] Modelo guardado en {lm_path}")
+    return True
+
+
+def load_lm(lm_path: str, lm_alpha: float):
+    try:
+        import kenlm
+        p = Path(lm_path)
+        if not p.exists():
+            print(f"[LM] Archivo no encontrado: {lm_path} — beam sin LM")
+            return None, 0.0
+        model = kenlm.Model(str(p))
+        print(f"[LM] Modelo cargado: {lm_path}  |  peso α={lm_alpha}")
+        return model, lm_alpha
+    except ImportError:
+        print("[LM] kenlm no instalado — beam sin LM (pip install kenlm para activar)")
+        return None, 0.0
+
 
 def get_device() -> torch.device:
     if torch.cuda.is_available():
@@ -129,12 +164,9 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     return start_epoch, best_cer
 
 
-# ── Evaluación ───────────────────────────────────────────────────────
+# --- Evaluación ---
 
 def evaluate_greedy(model, loader, device, use_amp: bool = False):
-    """
-    Greedy CTC. Devuelve (metrics_dict, hyps, refs).
-    """
     model.eval()
     hyps, refs = [], []
     with torch.no_grad():
@@ -156,10 +188,7 @@ def evaluate_greedy(model, loader, device, use_amp: bool = False):
 
 def evaluate_beam(model, loader, device, beam_width: int = 10,
                   beam_bonus: float = 2.0, beam_alpha: float = 0.65,
-                  use_amp: bool = False):
-    """
-    Beam search CTC. Devuelve (metrics_dict, hyps, refs).
-    """
+                  use_amp: bool = False, lm=None, lm_alpha: float = 0.4):
     model.eval()
     hyps, refs = [], []
     with torch.no_grad():
@@ -179,30 +208,20 @@ def evaluate_beam(model, loader, device, beam_width: int = 10,
                     seq, beam_width=beam_width,
                     blank_bonus=beam_bonus,
                     length_norm_alpha=beam_alpha,
+                    lm=lm, lm_alpha=lm_alpha,
                 ))
                 refs.append(texts[i])
     return compute_all_metrics(hyps, refs), hyps, refs
 
 
-def _font_labels_from_subset(subset, full_ds) -> list:
-    """Extrae etiquetas de fuente para las muestras de un Subset."""
-    indices = subset.indices if hasattr(subset, "indices") else list(range(len(full_ds)))
-    return [get_font_label(full_ds.samples[i][0]) for i in indices]
-
-
-# ── Función de entrenamiento de un modelo (usada también por CV/LOFO) ─
+# --- Entrenamiento de un modelo (usado por CV y LOFO) ---
 
 def _train_model(
     train_loader, val_loader, cfg: dict, device: torch.device,
     ckpt_path: Path, desc: str = "", skip_beam: bool = False,
+    lm=None, lm_alpha: float = 0.4,
+    pretrained_path: str | Path | None = None,
 ) -> tuple:
-    """
-    Entrena un modelo CRNN+CTC y guarda el mejor checkpoint (por CER greedy).
-    Devuelve (best_metrics, best_hyps_greedy, best_hyps_beam, best_refs).
-
-    skip_beam=True omite la evaluación beam al final (ahorra ~6 min por llamada).
-    Úsalo en CV y LOFO donde el beam no aporta valor adicional al resumen.
-    """
     use_amp  = cfg.get("use_amp", True) and device.type == "cuda"
     n_epochs = cfg["epochs"]
     prefix   = f"[{desc}] " if desc else ""
@@ -214,6 +233,17 @@ def _train_model(
         num_layers  = cfg.get("num_layers", 2),
         dropout     = cfg["dropout"],
     ).to(device)
+
+    # Warm start: carga pesos del modelo principal para acelerar convergencia en CV/LOFO.
+    if pretrained_path is not None and Path(pretrained_path).exists():
+        try:
+            ckpt_pre = torch.load(pretrained_path, map_location=device)
+            state    = {k.replace("_orig_mod.", ""): v
+                        for k, v in ckpt_pre["model_state"].items()}
+            model.load_state_dict(state)
+            print(f"  {prefix}→ Warm start desde '{Path(pretrained_path).name}'")
+        except Exception as e:
+            print(f"  {prefix}→ Warm start falló ({e}), inicio desde cero")
 
     ctc_loss  = nn.CTCLoss(blank=BLANK_IDX, reduction="mean", zero_infinity=True)
     optimizer = torch.optim.AdamW(model.parameters(),
@@ -251,8 +281,6 @@ def _train_model(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
                 scale_before = scaler.get_scale()
                 scaler.step(optimizer); scaler.update()
-                # Solo avanzar el scheduler si el optimizer realmente actualizó
-                # (si hubo inf/nan, scaler.step() lo omite y la escala baja)
                 if scaler.get_scale() == scale_before:
                     scheduler.step()
             else:
@@ -286,17 +314,13 @@ def _train_model(
                 "epoch": epoch, "model_state": model.state_dict(),
                 "best_cer": best_cer, "metrics": metrics_e, "config": cfg,
             }, ckpt_path)
-            print(f"  ✓ Mejor CER: {best_cer:.6f}  (guardado)")
+            print(f"  Mejor CER: {best_cer:.6f}  (guardado)")
 
-    # Beam sobre el mejor modelo (solo si no se ha pedido omitirlo)
     ckpt  = torch.load(ckpt_path, map_location=device)
     state = {k.replace("_orig_mod.", ""): v for k, v in ckpt["model_state"].items()}
     model.load_state_dict(state)
 
     if skip_beam:
-        # En CV y LOFO no necesitamos beam: devolvemos greedy como hyps_b
-        # (McNemar y Wilcoxon mostrarán 0 discordancias, lo cual es correcto
-        #  porque no estamos comparando decoders en este contexto)
         best_hyps_b = best_hyps_g
     else:
         _, best_hyps_b, _ = evaluate_beam(
@@ -305,28 +329,33 @@ def _train_model(
             beam_bonus=cfg["beam_bonus"],
             beam_alpha=cfg["beam_alpha"],
             use_amp=use_amp,
+            lm=lm, lm_alpha=lm_alpha,
         )
+
+    model.cpu()
+    del model, optimizer, scheduler
+    if scaler is not None:
+        del scaler
+    torch.cuda.empty_cache()
 
     return best_metrics, best_hyps_g, best_hyps_b, best_refs
 
 
-# ── Validación cruzada k-fold estratificada por fuente ───────────────
+# --- Validación cruzada k-fold estratificada por fuente ---
 
 def run_cross_validation(cfg: dict, full_ds: OCRDataset,
-                         ckpt_dir: Path, device: torch.device) -> dict:
-    """
-    k-fold CV estratificada por fuente tipográfica.
-    Garantiza que cada fold tenga (casi) la misma proporción de cada fuente.
-    """
+                         ckpt_dir: Path, device: torch.device,
+                         pretrained_path: str | Path | None = None) -> dict:
     import numpy as np
     k    = cfg["cv_folds"]
     seed = cfg.get("val_seed", 42)
 
     print(f"\n{'═'*66}")
     print(f"  VALIDACIÓN CRUZADA {k}-FOLD ESTRATIFICADA POR FUENTE")
+    if pretrained_path:
+        print(f"  Warm start: {pretrained_path}")
     print(f"{'═'*66}")
 
-    # Construir índices por fuente
     font_to_idx = defaultdict(list)
     for idx, (img_path, _) in enumerate(full_ds.samples):
         font_to_idx[get_font_label(img_path)].append(idx)
@@ -335,6 +364,7 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
     print(f"\n  Fuentes ({len(fonts)}): {', '.join(fonts)}")
 
     cv_epochs = cfg.get("cv_epochs", cfg["epochs"])
+    print(f"  Épocas por fold: {cv_epochs}")
 
     rng = np.random.default_rng(seed=seed)
     fold_indices = [[] for _ in range(k)]
@@ -342,10 +372,6 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
         arr = list(idxs); rng.shuffle(arr)
         for i, idx in enumerate(arr):
             fold_indices[i % k].append(idx)
-
-    print(f"  Épocas por fold: {cv_epochs}  (main training usó {cfg['epochs']})")
-    t_est = len(fold_indices[0]) / cfg["batch_size"] * cv_epochs * 1.3 / 60 * k
-    print(f"  Tiempo estimado total CV: ~{t_est:.0f} min")
 
     for i, fold in enumerate(fold_indices):
         print(f"  Fold {i+1}: {len(fold):,} muestras")
@@ -359,6 +385,7 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
     fold_results = []
     cv_ckpt_dir  = ckpt_dir / "cv_folds"
     cv_ckpt_dir.mkdir(exist_ok=True)
+    partial_path = ckpt_dir / "cv_partial_results.json"
 
     for fold_idx in range(k):
         print(f"\n{'─'*66}")
@@ -369,10 +396,17 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
         train_idx = [i for j, fold in enumerate(fold_indices)
                      if j != fold_idx for i in fold]
 
-        train_loader = DataLoader(Subset(full_ds, train_idx),
-                                  batch_size=cfg["batch_size"], shuffle=True, **loader_kw)
-        val_loader   = DataLoader(NoAugSubset(full_ds, val_idx),
-                                  batch_size=cfg["batch_size"], shuffle=False, **loader_kw)
+        train_subset = Subset(full_ds, train_idx)
+        val_subset   = NoAugSubset(full_ds, val_idx)
+
+        wc = full_ds._width_cache if full_ds._width_cache else None
+        train_sampler = BucketBatchSampler(train_subset, batch_size=cfg["batch_size"],
+                                           shuffle=True, width_cache=wc)
+        val_sampler   = BucketBatchSampler(val_subset,   batch_size=cfg["batch_size"],
+                                           shuffle=False, width_cache=wc)
+
+        train_loader = DataLoader(train_subset, batch_sampler=train_sampler, **loader_kw)
+        val_loader   = DataLoader(val_subset,   batch_sampler=val_sampler,   **loader_kw)
 
         print(f"  Train: {len(train_idx):,}  |  Val: {len(val_idx):,}")
 
@@ -382,18 +416,17 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
         best_m, hyps_g, hyps_b, refs = _train_model(
             train_loader, val_loader, fold_cfg, device,
             fold_ckpt, desc=f"Fold {fold_idx+1}/{k}", skip_beam=True,
+            pretrained_path=pretrained_path,
         )
         elapsed = (time.time() - t0) / 60
 
         font_lbls = [get_font_label(full_ds.samples[i][0]) for i in val_idx]
-        # Stat report por fold con bootstrap reducido (beam omitido en CV,
-        # hyps_b == hyps_g — McNemar y Wilcoxon mostrarán 0 discordancias)
         stat_r = compute_statistical_report(
             hyps_g, hyps_g, refs,
             font_labels=font_lbls,
             n_bootstrap=min(cfg["n_bootstrap"], 1000),
         )
-        fold_results.append({
+        fold_result = {
             "fold":       fold_idx + 1,
             "n_val":      len(val_idx),
             "CER":        best_m["CER"],
@@ -402,11 +435,13 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
             "Char_F1":    best_m["Char_F1"],
             "BLEU4_char": best_m["BLEU4_char"],
             "elapsed_min": elapsed,
-            "stat_report": stat_r,
-        })
+        }
+        fold_results.append(fold_result)
         print(f"  CER={best_m['CER']:.6f}  LineAcc={best_m['LineAcc']:.6f}  ({elapsed:.1f} min)")
 
-    # Resumen entre folds
+        with open(partial_path, "w", encoding="utf-8") as f:
+            json.dump({"completed_folds": fold_idx + 1, "fold_results": fold_results}, f, indent=2)
+
     import numpy as np
     from scipy import stats as _stats
 
@@ -439,20 +474,14 @@ def run_cross_validation(cfg: dict, full_ds: OCRDataset,
               f"IC95%=[{s['ci95_low']:.4f}, {s['ci95_high']:.4f}]  "
               f"CV={s['cv_pct']:.1f}%")
 
-    return {"k": k, "summary": summary, "fold_results": [
-        {k2: v2 for k2, v2 in r.items() if k2 != "stat_report"}
-        for r in fold_results
-    ]}
+    return {"k": k, "summary": summary, "fold_results": fold_results}
 
 
-# ── Leave-One-Font-Out ───────────────────────────────────────────────
+# --- Leave-One-Font-Out ---
 
 def run_lofo(cfg: dict, full_ds: OCRDataset,
-             ckpt_dir: Path, device: torch.device) -> dict:
-    """
-    Leave-One-Font-Out: entrena en N-1 fuentes, evalúa en la excluida.
-    Mide generalización genuina a tipografías no vistas.
-    """
+             ckpt_dir: Path, device: torch.device,
+             pretrained_path: str | Path | None = None) -> dict:
     import numpy as np
     from scipy import stats as _stats
 
@@ -461,6 +490,8 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
 
     print(f"\n{'═'*66}")
     print(f"  LEAVE-ONE-FONT-OUT (LOFO)")
+    if pretrained_path:
+        print(f"  Warm start: {pretrained_path}")
     print(f"{'═'*66}")
 
     font_to_idx = defaultdict(list)
@@ -471,10 +502,7 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
     print(f"\n  Fuentes ({len(all_fonts)}): {', '.join(all_fonts)}")
 
     lofo_epochs = cfg.get("lofo_epochs", cfg["epochs"])
-    print(f"  Épocas por iteración: {lofo_epochs}  (main training usó {cfg['epochs']})")
-    t_est = len(list(font_to_idx.values())[0]) / cfg["batch_size"] * \
-            lofo_epochs * 1.3 / 60 * len(all_fonts)
-    print(f"  Tiempo estimado total LOFO: ~{t_est:.0f} min")
+    print(f"  Épocas por iteración: {lofo_epochs}")
 
     loader_kw = dict(
         collate_fn=collate_fn,
@@ -485,6 +513,7 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
     lofo_results = []
     lofo_ckpt_dir = ckpt_dir / "lofo"
     lofo_ckpt_dir.mkdir(exist_ok=True)
+    partial_path = ckpt_dir / "lofo_partial_results.json"
 
     for held_font in all_fonts:
         print(f"\n{'─'*66}")
@@ -503,12 +532,21 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
         print(f"  Train: {len(train_idx):,}  |  Val-internal: {len(val_int_idx):,}"
               f"  |  Test ({held_font}): {len(test_idx):,}")
 
-        train_loader = DataLoader(Subset(full_ds, train_idx),
-                                  batch_size=cfg["batch_size"], shuffle=True, **loader_kw)
-        val_loader   = DataLoader(NoAugSubset(full_ds, val_int_idx),
-                                  batch_size=cfg["batch_size"], shuffle=False, **loader_kw)
-        test_loader  = DataLoader(NoAugSubset(full_ds, test_idx),
-                                  batch_size=cfg["batch_size"], shuffle=False, **loader_kw)
+        train_subset = Subset(full_ds, train_idx)
+        val_subset   = NoAugSubset(full_ds, val_int_idx)
+        test_subset  = NoAugSubset(full_ds, test_idx)
+
+        wc = full_ds._width_cache if full_ds._width_cache else None
+        train_sampler = BucketBatchSampler(train_subset, batch_size=cfg["batch_size"],
+                                           shuffle=True,  width_cache=wc)
+        val_sampler   = BucketBatchSampler(val_subset,   batch_size=cfg["batch_size"],
+                                           shuffle=False, width_cache=wc)
+        test_sampler  = BucketBatchSampler(test_subset,  batch_size=cfg["batch_size"],
+                                           shuffle=False, width_cache=wc)
+
+        train_loader = DataLoader(train_subset, batch_sampler=train_sampler, **loader_kw)
+        val_loader   = DataLoader(val_subset,   batch_sampler=val_sampler,   **loader_kw)
+        test_loader  = DataLoader(test_subset,  batch_sampler=test_sampler,  **loader_kw)
 
         lofo_ckpt = lofo_ckpt_dir / f"lofo_{held_font[:30]}_best.pt"
         t0 = time.time()
@@ -516,34 +554,38 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
         _, _, _, _ = _train_model(
             train_loader, val_loader, lofo_run_cfg, device,
             lofo_ckpt, desc=f"LOFO:{held_font[:20]}", skip_beam=True,
+            pretrained_path=pretrained_path,
         )
         elapsed = (time.time() - t0) / 60
 
-        # Cargar mejor modelo y evaluar en fuente retenida (solo greedy)
         ckpt  = torch.load(lofo_ckpt, map_location=device)
-        model = CRNN(
+        eval_model = CRNN(
             vocab_size=cfg["vocab_size"], img_height=cfg["img_height"],
             hidden_size=cfg["hidden_size"], num_layers=cfg.get("num_layers", 2),
         ).to(device)
         state = {k.replace("_orig_mod.", ""): v for k, v in ckpt["model_state"].items()}
-        model.load_state_dict(state)
+        eval_model.load_state_dict(state)
 
         use_amp_lofo  = cfg.get("use_amp", True) and device.type == "cuda"
         test_m, test_hyps_g, test_refs = evaluate_greedy(
-            model, test_loader, device, use_amp_lofo
+            eval_model, test_loader, device, use_amp_lofo
         )
-        # Bootstrap IC 95% sobre el conjunto de test de esta fuente
+
+        eval_model.cpu()
+        del eval_model
+        torch.cuda.empty_cache()
+
         from metrics import bootstrap_ci as _bci, cer as _cer_fn
         cer_arr = np.array([_cer_fn(h, r) for h, r in zip(test_hyps_g, test_refs)])
         bci = _bci(cer_arr, n_bootstrap=min(cfg["n_bootstrap"], 2000))
 
-        print(f"\n  ── Test sobre '{held_font}' (nunca visto en train) ──")
+        print(f"\n  Test sobre '{held_font}' (nunca visto en train):")
         print(f"  CER={test_m['CER']:.6f}  WER={test_m['WER']:.6f}  "
               f"LineAcc={test_m['LineAcc']:.6f}  "
               f"CER IC95%=[{bci['ci_low']:.6f}, {bci['ci_high']:.6f}]  "
               f"({elapsed:.1f} min)")
 
-        lofo_results.append({
+        lofo_result = {
             "held_font":   held_font,
             "n_test":      len(test_idx),
             "n_train":     len(train_idx),
@@ -554,9 +596,12 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
             "test_CER_ci95_low":  bci["ci_low"],
             "test_CER_ci95_high": bci["ci_high"],
             "elapsed_min": elapsed,
-        })
+        }
+        lofo_results.append(lofo_result)
 
-    # Resumen LOFO
+        with open(partial_path, "w", encoding="utf-8") as f:
+            json.dump({"completed": len(lofo_results), "lofo_results": lofo_results}, f, indent=2)
+
     print(f"\n{'═'*66}")
     print(f"  RESUMEN LOFO")
     print(f"{'═'*66}")
@@ -586,8 +631,6 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
               f"IC95%=[{vals.mean()-margin:.4f}, {vals.mean()+margin:.4f}]  "
               f"[{vals.min():.4f}–{vals.max():.4f}]")
 
-    # Degradación respecto al entrenamiento in-sample
-    # Recupera el CER in-sample del JSON final si existe
     final_json = ckpt_dir / "final_metrics.json"
     in_sample_cer = None
     if final_json.exists():
@@ -609,7 +652,7 @@ def run_lofo(cfg: dict, full_ds: OCRDataset,
     return {"lofo_results": lofo_results, "summary": summary_lofo}
 
 
-# ── Bucle de entrenamiento principal ─────────────────────────────────
+# --- Bucle de entrenamiento principal ---
 
 def train(cfg: dict) -> None:
     device = get_device()
@@ -620,22 +663,25 @@ def train(cfg: dict) -> None:
     import importlib
     import dataset as ds_module
     importlib.reload(ds_module)
-    from dataset import OCRDataset, collate_fn, NoAugSubset
+    from dataset import OCRDataset, collate_fn, NoAugSubset, BucketBatchSampler
 
     print(f"\nDispositivo: {device}  |  PyTorch {torch.__version__}")
     use_amp = cfg["use_amp"] and device.type == "cuda"
     print(f"AMP: {'ON' if use_amp else 'OFF'}")
 
-    # ── Dataset ────────────────────────────────────────────────────
     full_ds = OCRDataset(data_dir=cfg["data_dir"],
                          img_height=cfg["img_height"], augment=True)
+
+    print("Precalculando anchos de imagen (se reutilizarán en CV y LOFO)...")
+    full_ds.precompute_widths()
+    wc = full_ds._width_cache
+
     n_val   = max(1, int(len(full_ds) * cfg["val_split"]))
     n_train = len(full_ds) - n_val
     train_ds, val_ds = random_split(
         full_ds, [n_train, n_val],
         generator=torch.Generator().manual_seed(42)
     )
-    # NoAugSubset para validación: evita que augment=True contamine val
     val_ds_noaug = NoAugSubset(full_ds, list(val_ds.indices))
 
     loader_kw = dict(
@@ -645,13 +691,25 @@ def train(cfg: dict) -> None:
         prefetch_factor=cfg["prefetch_factor"] if cfg["num_workers"] > 0 else None,
         pin_memory=(device.type == "cuda"),
     )
-    train_loader = DataLoader(train_ds,        batch_size=cfg["batch_size"],
-                              shuffle=True,  **loader_kw)
-    val_loader   = DataLoader(val_ds_noaug,    batch_size=cfg["batch_size"],
-                              shuffle=False, **loader_kw)
+
+    print("Construyendo BucketBatchSampler para train...")
+    train_sampler = BucketBatchSampler(train_ds, batch_size=cfg["batch_size"],
+                                       shuffle=True, width_cache=wc)
+    print("Construyendo BucketBatchSampler para val...")
+    val_sampler   = BucketBatchSampler(val_ds_noaug, batch_size=cfg["batch_size"],
+                                       shuffle=False, width_cache=wc)
+
+    train_loader = DataLoader(train_ds,      batch_sampler=train_sampler, **loader_kw)
+    val_loader   = DataLoader(val_ds_noaug,  batch_sampler=val_sampler,   **loader_kw)
     print(f"Train: {n_train} | Val: {n_val} | Batches/época: {len(train_loader)}")
 
-    # ── Modelo ─────────────────────────────────────────────────────
+    lm_model, lm_alpha = None, 0.0
+    if cfg.get("corpus_dir") and cfg.get("lm_path"):
+        lm_path = cfg["lm_path"]
+        if not Path(lm_path).exists():
+            build_lm(cfg["corpus_dir"], lm_path)
+        lm_model, lm_alpha = load_lm(lm_path, cfg.get("lm_alpha_lm", 0.4))
+
     model = CRNN(
         vocab_size  = cfg["vocab_size"],
         img_height  = cfg["img_height"],
@@ -660,11 +718,10 @@ def train(cfg: dict) -> None:
         dropout     = cfg["dropout"],
     ).to(device)
 
-    print("torch.compile desactivado (anchos de imagen variables)")
+    # torch.compile no se usa: las imágenes tienen anchos variables por batch.
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parámetros: {n_params:,}")
 
-    # ── Loss, Optimizer, Scheduler, Scaler ─────────────────────────
     ctc_loss  = nn.CTCLoss(blank=BLANK_IDX, reduction="mean", zero_infinity=True)
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=cfg["lr"], weight_decay=cfg["weight_decay"])
@@ -676,7 +733,6 @@ def train(cfg: dict) -> None:
     )
     scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
-    # ── Checkpoints ────────────────────────────────────────────────
     ckpt_dir  = Path(cfg["checkpoint_dir"])
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     best_path   = ckpt_dir / "best_model.pt"
@@ -686,16 +742,15 @@ def train(cfg: dict) -> None:
     if cfg["resume"] and best_path.exists():
         start_epoch, best_cer = load_checkpoint(best_path, model, optimizer, scheduler, device)
 
-    # ── Historial ──────────────────────────────────────────────────
     history_path = Path(cfg["history_path"])
     history = {"train_loss": [], "val_metrics": []}
     if history_path.exists():
         with open(history_path) as f:
             history = json.load(f)
 
-    # ── Bucle principal ────────────────────────────────────────────
     print(f"\nIniciando desde época {start_epoch}/{cfg['epochs']}")
-    print(f"Validación: greedy en cada época  |  beam solo al final\n")
+    skip_beam_final = cfg.get("skip_beam_final", True)
+    print(f"Beam search final: {'DESACTIVADO' if skip_beam_final else 'ACTIVADO'}\n")
     total_t0 = time.time()
 
     for epoch in range(start_epoch, cfg["epochs"] + 1):
@@ -768,15 +823,14 @@ def train(cfg: dict) -> None:
             best_cer = metrics["CER"]
             save_checkpoint(best_path, epoch, model, optimizer, scheduler,
                             best_cer, metrics, cfg)
-            print(f"  ✓ Mejor modelo guardado  CER={best_cer:.4f}  [greedy]")
+            print(f"  Mejor modelo guardado  CER={best_cer:.4f}  [greedy]")
 
         if epoch % cfg["save_every"] == 0:
             periodic = ckpt_dir / f"ckpt_epoch{epoch:03d}.pt"
             save_checkpoint(periodic, epoch, model, optimizer, scheduler,
                             best_cer, metrics, cfg)
-            print(f"  ✓ Checkpoint guardado: {periodic.name}")
+            print(f"  Checkpoint guardado: {periodic.name}")
 
-    # ── Reporte final ───────────────────────────────────────────────
     total_min = (time.time() - total_t0) / 60
     print(f"\nEntrenamiento completado en {total_min:.1f} min  |  Mejor CER: {best_cer:.4f}\n")
 
@@ -786,30 +840,31 @@ def train(cfg: dict) -> None:
     model.load_state_dict(state)
     best_epoch = ckpt["epoch"]
 
-    # Greedy final
     greedy_metrics, hyps_g, refs = evaluate_greedy(model, val_loader, device, use_amp)
     print_metrics(greedy_metrics, title=f"EVALUACIÓN FINAL [greedy] — época {best_epoch}")
 
-    # Beam final
-    print(f"Ejecutando beam search final (w={cfg['beam_width']}, "
-          f"blank_bonus={cfg['beam_bonus']}, alpha={cfg['beam_alpha']})...")
-    beam_metrics, hyps_b, _ = evaluate_beam(
-        model, val_loader, device,
-        beam_width=cfg["beam_width"],
-        beam_bonus=cfg["beam_bonus"],
-        beam_alpha=cfg["beam_alpha"],
-        use_amp=use_amp,
-    )
-    print_metrics(beam_metrics, title=f"EVALUACIÓN FINAL [beam={cfg['beam_width']}] — época {best_epoch}")
+    if skip_beam_final:
+        print("\n[INFO] skip_beam_final=True — se omite beam search en val final.")
+        hyps_b = hyps_g
+        beam_metrics = greedy_metrics
+    else:
+        print(f"Ejecutando beam search final (w={cfg['beam_width']}, "
+              f"blank_bonus={cfg['beam_bonus']}, alpha={cfg['beam_alpha']})...")
+        beam_metrics, hyps_b, _ = evaluate_beam(
+            model, val_loader, device,
+            beam_width=cfg["beam_width"],
+            beam_bonus=cfg["beam_bonus"],
+            beam_alpha=cfg["beam_alpha"],
+            use_amp=use_amp,
+            lm=lm_model, lm_alpha=lm_alpha,
+        )
+        print_metrics(beam_metrics, title=f"EVALUACIÓN FINAL [beam={cfg['beam_width']}] — época {best_epoch}")
 
-    # ── Etiquetas de fuente para el conjunto de validación ──────────
     font_lbls = [get_font_label(full_ds.samples[i][0]) for i in val_ds.indices]
 
-    # ── Tests estadísticos ──────────────────────────────────────────
     print(f"\n{'═'*66}")
     print(f"  ANÁLISIS ESTADÍSTICO (n_bootstrap={cfg['n_bootstrap']:,})")
     print(f"{'═'*66}\n")
-    print("  Calculando... (puede tardar 1-2 min)")
 
     stat_report = compute_statistical_report(
         hyps_g, hyps_b, refs,
@@ -818,7 +873,6 @@ def train(cfg: dict) -> None:
     )
     print_statistical_report(stat_report)
 
-    # ── Guardar JSON ────────────────────────────────────────────────
     def _ser(m):
         return {k: ({str(kk): vv for kk, vv in v.items()} if isinstance(v, dict) else v)
                 for k, v in m.items()}
@@ -830,6 +884,7 @@ def train(cfg: dict) -> None:
             "total_time_min": total_min,
             "n_train": n_train,
             "n_val": n_val,
+            "skip_beam_final": skip_beam_final,
         },
         "greedy_metrics": _ser(greedy_metrics),
         "beam_metrics":   _ser(beam_metrics),
@@ -844,26 +899,34 @@ def train(cfg: dict) -> None:
         json.dump(final_report, f, indent=2, ensure_ascii=False)
     print(f"  Métricas finales guardadas en: {final_path}")
 
-    # ── Validación cruzada (opcional) ───────────────────────────────
+    model.cpu()
+    del model, optimizer, scheduler
+    if scaler is not None:
+        del scaler
+    torch.cuda.empty_cache()
+
     if cfg.get("cv_folds", 0) > 1:
         cv_cfg = {**cfg, "use_amp": use_amp}
-        cv_result = run_cross_validation(cv_cfg, full_ds, ckpt_dir, device)
+        cv_result = run_cross_validation(
+            cv_cfg, full_ds, ckpt_dir, device,
+        )
         cv_path = ckpt_dir / "cross_validation_results.json"
         with open(cv_path, "w", encoding="utf-8") as f:
             json.dump(cv_result, f, indent=2, ensure_ascii=False)
         print(f"  CV guardada en: {cv_path}")
 
-    # ── LOFO (opcional) ─────────────────────────────────────────────
     if cfg.get("lofo", False):
         lofo_cfg = {**cfg, "use_amp": use_amp, "val_seed": 42}
-        lofo_result = run_lofo(lofo_cfg, full_ds, ckpt_dir, device)
+        lofo_result = run_lofo(
+            lofo_cfg, full_ds, ckpt_dir, device,
+        )
         lofo_path = ckpt_dir / "lofo_results.json"
         with open(lofo_path, "w", encoding="utf-8") as f:
             json.dump(lofo_result, f, indent=2, ensure_ascii=False)
         print(f"  LOFO guardado en: {lofo_path}")
 
 
-# ── Entry point ──────────────────────────────────────────────────────
+# --- Entry point ---
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -877,18 +940,15 @@ if __name__ == "__main__":
     parser.add_argument("--beam_width",      type=int,   default=CONFIG["beam_width"])
     parser.add_argument("--beam_bonus",      type=float, default=CONFIG["beam_bonus"])
     parser.add_argument("--beam_alpha",      type=float, default=CONFIG["beam_alpha"])
-    parser.add_argument("--n_bootstrap",     type=int,   default=CONFIG["n_bootstrap"],
-                        help="Iteraciones de bootstrap (default 10000)")
-    parser.add_argument("--cv_folds",        type=int,   default=CONFIG["cv_folds"],
-                        help="Folds para CV estratificada (0 = desactivado)")
-    parser.add_argument("--cv_epochs",       type=int,   default=CONFIG["cv_epochs"],
-                        help="Épocas por fold en CV (default 30, < epochs para ahorrar tiempo)")
-    parser.add_argument("--lofo",            action="store_true",
-                        help="Ejecutar Leave-One-Font-Out al final")
-    parser.add_argument("--lofo_epochs",     type=int,   default=CONFIG["lofo_epochs"],
-                        help="Épocas por iteración en LOFO (default 30)")
+    parser.add_argument("--n_bootstrap",     type=int,   default=CONFIG["n_bootstrap"])
+    parser.add_argument("--cv_folds",        type=int,   default=CONFIG["cv_folds"])
+    parser.add_argument("--cv_epochs",       type=int,   default=CONFIG["cv_epochs"])
+    parser.add_argument("--lofo",            action="store_true")
+    parser.add_argument("--lofo_epochs",     type=int,   default=CONFIG["lofo_epochs"])
     parser.add_argument("--no_amp",          action="store_true")
     parser.add_argument("--no_resume",       action="store_true")
+    parser.add_argument("--run_beam",        action="store_true",
+                        help="Activar beam search en evaluación final")
     args = parser.parse_args()
 
     cfg = CONFIG.copy()
@@ -908,6 +968,7 @@ if __name__ == "__main__":
         "cv_epochs":   args.cv_epochs,
         "lofo":        args.lofo,
         "lofo_epochs": args.lofo_epochs,
+        "skip_beam_final": not args.run_beam,
     })
     if args.no_amp:    cfg["use_amp"] = False
     if args.no_resume: cfg["resume"]  = False
