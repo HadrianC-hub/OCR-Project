@@ -10,24 +10,20 @@ import numpy as np
 from scipy.ndimage import uniform_filter
 
 sys.path.insert(0, str(Path(__file__).parent))
-from preprocessing.pipeline     import run, analyze, auto_config, to_gray, deskew_image
-from preprocessing.binarization import binarize, clean_binary, filter_small_components
+from preprocessing.pipeline import run, analyze, auto_config
 
 
-# CONFIGURACIÓN GLOBAL
-INPUT_PATH       = Path("imagenes")    # archivo .jpg/.png individual O carpeta con imágenes
-OUTPUT_DIR       = Path("resultados")  # carpeta de salida para todas las imágenes
-SINGLE_LINE_MODE = False               # si True, advierte cuando una imagen no tenga exactamente 1 línea
+INPUT_PATH       = Path("imagenes")
+OUTPUT_DIR       = Path("resultados")
+SINGLE_LINE_MODE = False
 
 PALETTE = [
-    (46,  204, 113),  (52,  152, 219),  (231,  76,  60),
-    (241, 196,  15),  (155,  89, 182),  ( 26, 188, 156),
+    (46,  204, 113), (52,  152, 219), (231,  76,  60),
+    (241, 196,  15), (155,  89, 182), ( 26, 188, 156),
     (230, 126,  34),
 ]
 BLOCK_COLORS = [(255, 144, 30), (0, 200, 180), (200, 80, 200)]
 
-
-# Helpers
 
 def _save(path: str, img: np.ndarray) -> None:
     """Guarda con imencode para soportar rutas no-ASCII en Windows."""
@@ -42,18 +38,14 @@ def _sep(char: str = "─", w: int = 60) -> str:
     return f"  {char * w}"
 
 
-# Generación de imágenes
-
 def vis_lines_detected(
-    binary:         np.ndarray,
-    line_boxes:     list,
-    block_boxes:    list,
-    out:            Path,
-    prefix:         str = "",
-    oriented_boxes: list = None,
+    img:         np.ndarray,
+    line_boxes:  list,
+    block_boxes: list,
+    out:         Path,
+    prefix:      str = "",
 ) -> None:
-    """Dibuja bounding-boxes de bloques y líneas sobre la imagen binarizada."""
-    vis = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+    vis = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()
     H, W = vis.shape[:2]
 
     for bi, blk in enumerate(block_boxes):
@@ -70,65 +62,12 @@ def vis_lines_detected(
             cv2.rectangle(vis, (x_left, y_top), (x_right, y_bot), color, 2)
             cv2.putText(vis, f"L{i+1}", (x_left + 6, max(20, y_top + 18)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
-        else:
-            # unknown format — skip
-            continue
-
-    # Dibujar cajas orientadas si están disponibles
-    if oriented_boxes:
-        for i, ob in enumerate(oriented_boxes):
-            try:
-                cx, cy, w, h, ang = ob
-                box = cv2.boxPoints(((float(cx), float(cy)), (float(w), float(h)), float(ang)))
-                box = np.int0(box)
-                color = PALETTE[(i + 2) % len(PALETTE)]
-                cv2.polylines(vis, [box], True, color, 2)
-                # put label near top-left of bounding rect
-                tl = tuple(box.min(axis=0))
-                cv2.putText(vis, f"R{i+1}", (int(tl[0]) + 6, int(tl[1]) + 18),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
-            except Exception:
-                continue
 
     summ = f"{len(line_boxes)} lineas  |  {len(block_boxes)} bloques"
     cv2.putText(vis, summ, (10, H - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 0, 0),       3)
     cv2.putText(vis, summ, (10, H - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2)
 
     _save(str(out / f"{prefix}lines_detected.jpg"), vis)
-
-def save_line_images(
-    lines:        list,
-    out:          Path,
-    min_ink_pct:  float = 2.0,
-    prefix:       str   = "",
-    fixed_name:   str   = "",
-) -> int:
-    """Guarda cada línea normalizada (float32 [0,1]) como JPEG en `out`. Omite líneas vacías.
-
-    Si `fixed_name` está definido, la primera línea válida se guarda con ese nombre exacto
-    (útil en SINGLE_LINE_MODE para obtener simplemente '{stem}.jpg').
-    """
-    out.mkdir(parents=True, exist_ok=True)
-    saved = 0
-    for i, line in enumerate(lines, 1):
-        if 100.0 * float((line < 0.5).mean()) < min_ink_pct:
-            continue
-        img_u8 = (line * 255.0).clip(0, 255).astype("uint8")
-        ok, buf = cv2.imencode(".jpg", img_u8)
-        if not ok:
-            print(f"  [WARN] no se pudo codificar línea {i}")
-            continue
-        if fixed_name:
-            filename = fixed_name
-        elif prefix:
-            filename = f"{prefix}line_{i:03d}.jpg"
-        else:
-            filename = f"line_{i:03d}.jpg"
-        (out / filename).write_bytes(buf.tobytes())
-        saved += 1
-        if fixed_name:
-            break   # en modo nombre fijo solo se guarda la primera línea válida
-    return saved
 
 
 def save_line_crops(
@@ -137,12 +76,7 @@ def save_line_crops(
     out:        Path,
     fixed_name: str = "",
 ) -> int:
-    """Recorta cada línea directamente de la imagen original y la guarda como JPEG.
-
-    Usa las coordenadas (y_top, y_bot, x_left, x_right) de line_boxes para
-    recortar img_bgr sin ningún procesado adicional, evitando artefactos de
-    binarización o normalización.
-    """
+    """Recorta cada línea de la imagen original y la guarda como JPEG sin procesado adicional."""
     out.mkdir(parents=True, exist_ok=True)
     saved = 0
     for i, (y_top, y_bot, x_left, x_right) in enumerate(line_boxes, 1):
@@ -153,64 +87,13 @@ def save_line_crops(
         if not ok:
             print(f"  [WARN] no se pudo codificar línea {i}")
             continue
-        if fixed_name:
-            filename = fixed_name
-        else:
-            filename = f"line_{i:03d}.jpg"
+        filename = fixed_name if fixed_name else f"line_{i:03d}.jpg"
         (out / filename).write_bytes(buf.tobytes())
         saved += 1
         if fixed_name:
             break
     return saved
 
-
-def save_rotated_line_crops(
-    img_bgr: np.ndarray,
-    oriented_boxes: list,
-    out: Path,
-) -> int:
-    """Guarda recortes rotados según `oriented_boxes`.
-
-    `oriented_boxes` es lista de tuplas (cx, cy, w, h, angle)
-    retornadas por `cv2.minAreaRect` (centro en coordenadas de imagen,
-    anchura, altura y ángulo en grados).
-    """
-    out.mkdir(parents=True, exist_ok=True)
-    saved = 0
-    if img_bgr is None or oriented_boxes is None:
-        return 0
-    for i, ob in enumerate(oriented_boxes, 1):
-        try:
-            cx, cy, w, h, ang = ob
-            if w <= 0 or h <= 0:
-                continue
-            # cv2.getRotationMatrix2D rotates around center; build matrix
-            M = cv2.getRotationMatrix2D((cx, cy), ang, 1.0)
-            H_img, W_img = img_bgr.shape[:2]
-            rotated = cv2.warpAffine(img_bgr, M, (W_img, H_img), flags=cv2.INTER_LINEAR,
-                                     borderMode=cv2.BORDER_CONSTANT, borderValue=(255,255,255))
-            # crop centered at (cx,cy) with size (w,h)
-            w_i, h_i = int(round(w)), int(round(h))
-            x0 = int(round(cx - w_i / 2.0))
-            y0 = int(round(cy - h_i / 2.0))
-            x1 = x0 + w_i
-            y1 = y0 + h_i
-            x0c, y0c = max(0, x0), max(0, y0)
-            x1c, y1c = min(W_img, x1), min(H_img, y1)
-            crop = rotated[y0c:y1c, x0c:x1c]
-            if crop.size == 0:
-                continue
-            name = f"rot_crop_{i:03d}.jpg"
-            ok, buf = cv2.imencode('.jpg', crop)
-            if ok:
-                (out / name).write_bytes(buf.tobytes())
-                saved += 1
-        except Exception:
-            continue
-    return saved
-
-
-# Diagnóstico por consola
 
 def _print_stats(binary: np.ndarray, line_boxes: list, block_boxes: list) -> None:
     H, W   = binary.shape
@@ -239,21 +122,37 @@ def _print_stats(binary: np.ndarray, line_boxes: list, block_boxes: list) -> Non
               f"  densidad={float(bseg.mean()) if len(bseg) else 0:.1f}px")
 
 
-# Punto de entrada por imagen
+def _deskew_color(img_bgr: np.ndarray, angle: float) -> np.ndarray:
+    """Aplica la misma rotación de deskew global a la imagen BGR original."""
+    if abs(angle) < 0.05:
+        return img_bgr
+    H, W = img_bgr.shape[:2]
+    M = cv2.getRotationMatrix2D((W / 2.0, H / 2.0), angle, 1.0)
+    border_px = np.concatenate([
+        img_bgr[0, :, :].reshape(-1, 3),
+        img_bgr[-1, :, :].reshape(-1, 3),
+        img_bgr[:, 0, :].reshape(-1, 3),
+        img_bgr[:, -1, :].reshape(-1, 3),
+    ])
+    bg = tuple(int(v) for v in np.median(border_px, axis=0).tolist())
+    return cv2.warpAffine(img_bgr, M, (W, H),
+                          flags=cv2.INTER_LINEAR,
+                          borderMode=cv2.BORDER_CONSTANT,
+                          borderValue=bg)
+
 
 def run_and_visualize(
     image_path: str,
     debug_dir:  str = str(OUTPUT_DIR),
 ) -> None:
-    """Ejecuta el pipeline y emite diagnóstico + archivos de salida.
+    """
+    Ejecuta el pipeline completo y emite diagnóstico por consola + archivos de salida.
 
     Estructura de salida:
-        debug/
-            {stem}_lines_detected.jpg   ← imagen global en la raíz
+        {debug_dir}/
+            {stem}_lines_detected.jpg   ← bounding-boxes sobre imagen deskewed
             {stem}/
-                line_001.jpg            ← líneas individuales en subcarpeta
-                line_002.jpg
-                ...
+                line_001.jpg … line_NNN.jpg
     """
     stem = Path(image_path).stem
     print()
@@ -293,30 +192,17 @@ def run_and_visualize(
     if SINGLE_LINE_MODE and result.n_lines != 1:
         print(_sep())
         if result.n_lines == 0:
-            print(f"  [!]  SINGLE_LINE_MODE: no se detecto ninguna linea en '{Path(image_path).name}'")
+            print(f"  [!]  SINGLE_LINE_MODE: no se detectó ninguna línea en '{Path(image_path).name}'")
         else:
-            print(f"  [!]  SINGLE_LINE_MODE: se esperaba 1 linea pero se detectaron "
+            print(f"  [!]  SINGLE_LINE_MODE: se esperaba 1 línea pero se detectaron "
                   f"{result.n_lines} en '{Path(image_path).name}'")
 
-    # Reconstruir binary para la visualización
-    gray = to_gray(img_bgr, cfg)
-    if cfg.deskew:
-        gray, angle = deskew_image(gray)
-        if abs(angle) > 0.1:
-            print(f"\n  Deskew global: {angle:.2f}°")
+    deskew_angle = getattr(result, 'deskew_angle', 0.0)
+    img_vis      = _deskew_color(img_bgr, deskew_angle)
+    if abs(deskew_angle) > 0.1:
+        print(f"\n  Deskew global: {deskew_angle:.2f}°")
 
-    binary = binarize(
-        img=gray, window=cfg.sauvola_window, k=cfg.sauvola_k,
-        use_clahe=cfg.use_clahe, clahe_clip=cfg.clahe_clip, clahe_tile=cfg.clahe_tile,
-        invert=cfg.invert_binary,
-        use_bilateral=cfg.use_bilateral, bilateral_d=cfg.bilateral_d,
-        bilateral_sc=cfg.bilateral_sc, bilateral_ss=cfg.bilateral_ss,
-        global_floor_pct=cfg.global_floor_pct,
-    )
-    if cfg.morph_open > 0 or cfg.morph_close > 0:
-        binary = clean_binary(binary, cfg.morph_open, cfg.morph_close)
-    if cfg.min_component_area > 0:
-        binary = filter_small_components(binary, cfg.min_component_area)
+    binary = result.binary
 
     _print_stats(binary, result.line_boxes, result.block_boxes)
 
@@ -335,29 +221,19 @@ def run_and_visualize(
     print("  SALIDA")
     print(_sep())
     if SINGLE_LINE_MODE:
-        # Sin imagen de diagnóstico; línea guardada directamente como {stem}.jpg
         n_saved = save_line_crops(binary, result.line_boxes, out, fixed_name=f"{stem}.jpg")
         print(f"  [OK]   {n_saved} líneas → {stem}.jpg")
     else:
         lines_dir = out / stem
-        vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_", oriented_boxes=getattr(result, 'oriented_boxes', None))
+        vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
         n_saved = save_line_crops(binary, result.line_boxes, lines_dir)
-        # Guardar también recortes rotados si el pipeline devolvió oriented_boxes
-        orients = getattr(result, 'oriented_boxes', None)
-        if orients:
-            n_rot = save_rotated_line_crops(img_bgr, orients, lines_dir)
-            if n_rot > 0:
-                print(f"  [OK]   {n_rot} recortes rotados → {lines_dir}")
         print(f"  [OK]   {n_saved} líneas → {stem}/line_NNN.jpg")
     print()
     print(_sep("═"))
     print()
 
 
-# Batch
-
 def _process_one(img_path: Path, output_dir: Path, quiet: bool = False) -> tuple[str, bool, str]:
-    """Procesa una sola imagen."""
     try:
         if quiet:
             buf = io.StringIO()
@@ -369,8 +245,8 @@ def _process_one(img_path: Path, output_dir: Path, quiet: bool = False) -> tuple
     except Exception:
         return (img_path.name, False, traceback.format_exc())
 
+
 def run_batch(input_dir: Path, output_dir: Path) -> None:
-    """Procesa todos los .jpg de input_dir (1 imagen a la vez)."""
     if not input_dir.is_dir():
         print(f"ERROR: '{input_dir}' no es una carpeta válida.", file=sys.stderr)
         sys.exit(1)
@@ -404,6 +280,7 @@ def run_batch(input_dir: Path, output_dir: Path) -> None:
     print(f"  Completado en {time.time()-t0:.1f}s  —  OK: {ok_count}  ERROR: {err_count}")
     print(f"{'='*60}\n")
 
+
 def main() -> None:
     inp = INPUT_PATH.resolve()
     out = OUTPUT_DIR.resolve()
@@ -418,6 +295,7 @@ def main() -> None:
     else:
         print(f"ERROR: INPUT_PATH='{inp}' no existe.", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

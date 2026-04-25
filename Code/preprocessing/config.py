@@ -3,14 +3,10 @@ from typing import Optional
 import numpy as np
 
 
-# Constantes globales
+TARGET_HEIGHT: int = 64   # altura fija de normalización (divisible por 16, compatible con encoders convolucionales)
+PAD_VALUE:   float = 1.0  # fondo blanco en espacio [0,1]
+MIN_WIDTH:     int = 16   # ancho mínimo para evitar tensores degenerados
 
-TARGET_HEIGHT: int = 32   # altura fija de todas las líneas normalizadas (px)
-PAD_VALUE:   float = 1.0  # valor de relleno en [0,1] (fondo blanco)
-MIN_WIDTH:     int = 16   # ancho mínimo para evitar imágenes degeneradas
-
-
-# Métricas de imagen (resultado de analyze())
 
 @dataclass
 class ImageMetrics:
@@ -25,8 +21,6 @@ class ImageMetrics:
     H:                 int
     W:                 int
 
-
-# Configuración del pipeline
 
 @dataclass
 class PipelineConfig:
@@ -50,11 +44,13 @@ class PipelineConfig:
     deskew_max_angle: float = 15.0
 
     # Deskew por bloque
-    deskew_blocks:          bool  = False
-    deskew_block_max_angle: float = 15.0
+    deskew_blocks:             bool  = False
+    deskew_block_max_angle:    float = 15.0
+    block_min_h_for_skew:      int   = 60
+    block_residual_threshold:  float = 0.5
 
     # Segmentación de líneas
-    min_line_height:   int  = 24  # altura mínima; 24 es balance entre evitar fragmentación e incluir líneas pequeñas
+    min_line_height:   int  = 24
     min_line_width:    int  = 20
     line_merge_gap:    int  = 4
     projection_smooth: int  = 3
@@ -92,19 +88,16 @@ class PipelineConfig:
     min_component_area:            int   = 0
     use_adaptive_component_filter: bool  = False
     use_remove_bg:                 bool  = False
-    # Extra: usar recortes orientados (rotated rectangles) por línea
     use_oriented_crop:             bool  = True
 
     # Fusión de bloques
     para_split_factor: float = 2.5
     block_merge_gap:   int   = 0
 
-    # Control
-    debug:     bool = True
+    # Debug
+    debug:     bool = False
     debug_dir: str  = "debug_pipeline"
 
-
-# Resultado del pipeline
 
 @dataclass
 class PipelineResult:
@@ -113,6 +106,7 @@ class PipelineResult:
     block_boxes: list[tuple[int, int, int, int]] = field(default_factory=list)
     oriented_boxes: list[tuple[float, float, float, float, float]] = field(default_factory=list)
     binary:      Optional[np.ndarray]            = None
+    deskew_angle: float                          = 0.0
     n_lines:     int                             = 0
     warnings:    list[str]                       = field(default_factory=list)
     config_used: Optional[PipelineConfig]        = None
