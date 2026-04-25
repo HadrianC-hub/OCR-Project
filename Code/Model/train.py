@@ -57,11 +57,6 @@ CONFIG = {
     "beam_bonus":  2.0,
     "beam_alpha":  0.65,
 
-    # KenLM
-    "corpus_dir":  f"/kaggle/input/{DATASET_NAME}/Corpus",
-    "lm_path":     "/kaggle/working/lm_5gram.arpa",
-    "lm_alpha_lm": 0.4,
-
     # Estadística
     "n_bootstrap": 10_000,
     "cv_folds":    0,
@@ -79,53 +74,6 @@ CONFIG = {
     "resume":     True,
 }
 # ======================================================================
-
-
-# --- KenLM ---
-
-def build_lm(corpus_dir: str, lm_path: str, order: int = 5) -> bool:
-    import subprocess
-    import tempfile
-
-    corpus = Path(corpus_dir)
-    if not corpus.exists():
-        print(f"[LM] corpus_dir no encontrado: {corpus_dir} — omitiendo build_lm")
-        return False
-
-    txt_files = sorted(corpus.glob("**/*.txt"))
-    if not txt_files:
-        print(f"[LM] No se encontraron .txt en {corpus_dir} — omitiendo build_lm")
-        return False
-
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
-        combined = fh.name
-        for f in txt_files:
-            fh.write(f.read_text(encoding="utf-8", errors="replace"))
-            fh.write("\n")
-
-    print(f"[LM] Entrenando modelo {order}-gram con {len(txt_files)} archivos → {lm_path}")
-    cmd = f"lmplz -o {order} --discount_fallback < {combined} > {lm_path}"
-    ret = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if ret.returncode != 0:
-        print(f"[LM] lmplz falló:\n{ret.stderr}")
-        return False
-    print(f"[LM] Modelo guardado en {lm_path}")
-    return True
-
-
-def load_lm(lm_path: str, lm_alpha: float):
-    try:
-        import kenlm
-        p = Path(lm_path)
-        if not p.exists():
-            print(f"[LM] Archivo no encontrado: {lm_path} — beam sin LM")
-            return None, 0.0
-        model = kenlm.Model(str(p))
-        print(f"[LM] Modelo cargado: {lm_path}  |  peso α={lm_alpha}")
-        return model, lm_alpha
-    except ImportError:
-        print("[LM] kenlm no instalado — beam sin LM (pip install kenlm para activar)")
-        return None, 0.0
 
 
 def get_device() -> torch.device:
@@ -188,7 +136,7 @@ def evaluate_greedy(model, loader, device, use_amp: bool = False):
 
 def evaluate_beam(model, loader, device, beam_width: int = 10,
                   beam_bonus: float = 2.0, beam_alpha: float = 0.65,
-                  use_amp: bool = False, lm=None, lm_alpha: float = 0.4):
+                  use_amp: bool = False):
     model.eval()
     hyps, refs = [], []
     with torch.no_grad():
@@ -208,7 +156,6 @@ def evaluate_beam(model, loader, device, beam_width: int = 10,
                     seq, beam_width=beam_width,
                     blank_bonus=beam_bonus,
                     length_norm_alpha=beam_alpha,
-                    lm=lm, lm_alpha=lm_alpha,
                 ))
                 refs.append(texts[i])
     return compute_all_metrics(hyps, refs), hyps, refs
@@ -219,7 +166,6 @@ def evaluate_beam(model, loader, device, beam_width: int = 10,
 def _train_model(
     train_loader, val_loader, cfg: dict, device: torch.device,
     ckpt_path: Path, desc: str = "", skip_beam: bool = False,
-    lm=None, lm_alpha: float = 0.4,
     pretrained_path: str | Path | None = None,
 ) -> tuple:
     use_amp  = cfg.get("use_amp", True) and device.type == "cuda"
@@ -329,7 +275,6 @@ def _train_model(
             beam_bonus=cfg["beam_bonus"],
             beam_alpha=cfg["beam_alpha"],
             use_amp=use_amp,
-            lm=lm, lm_alpha=lm_alpha,
         )
 
     model.cpu()
@@ -703,13 +648,6 @@ def train(cfg: dict) -> None:
     val_loader   = DataLoader(val_ds_noaug,  batch_sampler=val_sampler,   **loader_kw)
     print(f"Train: {n_train} | Val: {n_val} | Batches/época: {len(train_loader)}")
 
-    lm_model, lm_alpha = None, 0.0
-    if cfg.get("corpus_dir") and cfg.get("lm_path"):
-        lm_path = cfg["lm_path"]
-        if not Path(lm_path).exists():
-            build_lm(cfg["corpus_dir"], lm_path)
-        lm_model, lm_alpha = load_lm(lm_path, cfg.get("lm_alpha_lm", 0.4))
-
     model = CRNN(
         vocab_size  = cfg["vocab_size"],
         img_height  = cfg["img_height"],
@@ -856,7 +794,6 @@ def train(cfg: dict) -> None:
             beam_bonus=cfg["beam_bonus"],
             beam_alpha=cfg["beam_alpha"],
             use_amp=use_amp,
-            lm=lm_model, lm_alpha=lm_alpha,
         )
         print_metrics(beam_metrics, title=f"EVALUACIÓN FINAL [beam={cfg['beam_width']}] — época {best_epoch}")
 

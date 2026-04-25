@@ -141,11 +141,9 @@ def decode_ctc_beam(
     beam_width: int = 10,
     blank_bonus: float = 2.0,
     length_norm_alpha: float = 0.65,
-    lm=None,
-    lm_alpha: float = 0.4,
 ) -> str:
     """
-    Beam search CTC con normalización de longitud y fusión superficial de LM.
+    Beam search CTC con normalización de longitud.
 
     Mantiene dos scores por hipótesis: p_b (termina en blank) y p_nb (no blank).
     Esta separación es necesaria para manejar correctamente la duplicación de
@@ -190,11 +188,7 @@ def decode_ctc_beam(
     def _normed_score(seq):
         raw  = _log_add(beams[seq][0], beams[seq][1])
         norm = max(len(seq), 1) ** length_norm_alpha
-        lm_score = 0.0
-        if lm is not None and seq:
-            text = "".join(IDX2CHAR.get(c, "") for c in seq)
-            lm_score = lm_alpha * lm.score(text, bos=True, eos=True) * math.log(10)
-        return raw / norm + lm_score
+        return raw / norm
 
     best = max(beams.keys(), key=_normed_score)
     return "".join(IDX2CHAR.get(c, "") for c in best)
