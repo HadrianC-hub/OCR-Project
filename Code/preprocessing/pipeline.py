@@ -7,7 +7,8 @@ from scipy.ndimage import uniform_filter
 from scipy.signal  import find_peaks
 
 from preprocessing.binarization    import (
-    binarize, clean_binary, adaptive_filter_components, filter_small_components
+    binarize, clean_binary, adaptive_filter_components, filter_small_components,
+    mask_binding_strips, trim_orphan_components,
 )
 from preprocessing.config          import (
     ImageMetrics, PipelineConfig, PipelineResult
@@ -90,26 +91,6 @@ def analyze(img: np.ndarray) -> ImageMetrics:
     )
 
 
-def _detect_binding_margin(img: np.ndarray, W: int, side: str) -> float:
-    """
-    Detecta si hay una franja oscura de encuadernación en el borde izquierdo o
-    derecho de la imagen. Devuelve la fracción de ancho a excluir de la proyección
-    horizontal para que detect_lines no vea esa franja como tinta real.
-    """
-    gray_tmp = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
-    probe_w  = max(40, W // 12)
-    center_mean = float(gray_tmp[:, W // 4: 3 * W // 4].mean())
-    if center_mean < 1.0:
-        return 0.03
-    if side == "left":
-        edge_mean = float(gray_tmp[:, :probe_w].mean())
-    else:
-        edge_mean = float(gray_tmp[:, W - probe_w:].mean())
-    # Si el borde lateral es notablemente más oscuro que el centro (papel), es
-    # un artefacto de encuadernación: excluir ~8% del ancho.
-    return 0.08 if edge_mean < center_mean * 0.60 else 0.03
-
-
 def auto_config(img: np.ndarray) -> PipelineConfig:
     m = analyze(img)
 
@@ -146,8 +127,6 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
         straighten_lines=True,
         deskew=True,
         deskew_blocks=True,
-        projection_left_margin_frac=_detect_binding_margin(img, m.W, side="left"),
-        projection_right_margin_frac=_detect_binding_margin(img, m.W, side="right"),
     )
 
 
@@ -190,23 +169,6 @@ def _find_column_separators(
     min_col_dist  = max(W // 4, 80)
 
     v_proj = (binary < 128).astype(np.float64).sum(axis=0)
-
-    # Suprimir picos de artefacto de encuadernación en los bordes laterales.
-    # Si una franja lateral tiene una densidad media > 1.5× la del centro, es
-    # un artefacto (banda de escáner, encuadernación) y su amplitud inflaría
-    # v_max haciendo que los picos reales de las columnas no superen el umbral
-    # del 10%. Se reemplaza con la densidad media del tramo contiguo hacia el
-    # centro para no distorsionar tampoco el cálculo de total_ink.
-    probe_cols   = max(40, W // 12)
-    center_mean  = float(v_proj[W // 4: 3 * W // 4].mean()) if W >= 4 else 1.0
-    if center_mean > 0:
-        if float(v_proj[:probe_cols].mean()) > center_mean * 1.5:
-            fill_val = float(v_proj[probe_cols: probe_cols * 2].mean())
-            v_proj[:probe_cols] = min(fill_val, center_mean)
-        if float(v_proj[W - probe_cols:].mean()) > center_mean * 1.5:
-            fill_val = float(v_proj[W - probe_cols * 2: W - probe_cols].mean())
-            v_proj[W - probe_cols:] = min(fill_val, center_mean)
-
     v_sm   = uniform_filter(v_proj, size=smooth_size)
     v_max  = float(v_sm.max())
     if v_max == 0:
@@ -225,16 +187,42 @@ def _find_column_separators(
         depth = (lp - vv) / lp if lp > 0 else 0.0
         if depth < min_depth or not (W * 0.15 < vi < W * 0.85):
             continue
-        gL, gR   = vi, vi
-        half_thr = lp * (1 - min_depth * 0.5)
-        while gL > 0     and v_sm[gL - 1] <= half_thr: gL -= 1
-        while gR < W - 1 and v_sm[gR + 1] <= half_thr: gR += 1
-        if (gR - gL) < max(40, W // 20):
+        # Detección bilateral del hueco (gutter): se camina desde cada pico
+        # hacia el otro hasta que la densidad cae por debajo de un umbral
+        # situado a media profundidad del valle. `gL` marca dónde termina la
+        # caída desde el pico izquierdo (≈ derecha del texto izquierdo); `gR`
+        # dónde empieza la subida hacia el pico derecho (≈ izquierda del
+        # texto derecho). El separador se coloca en el centro de [gL, gR].
+        #
+        # Esto reemplaza la elección anterior basada en argmin, que en libros
+        # con encuadernación central daba resultados sesgados: la zona del lomo
+        # introduce moteado de tinta (densidad ~0.3 × pico) que no rompe la
+        # condición de "valle" pero desplaza el mínimo absoluto hacia uno de
+        # los dos lados, dejando el separador pegado al borde de la página
+        # vecina y permitiendo que sus letras iniciales se filtren al bbox de
+        # la columna actual.
+        #
+        # El umbral a media profundidad (vv + (lp-vv)*0.5 ≈ punto medio entre
+        # fondo del valle y la cresta más baja) es el compromiso correcto: si
+        # se pone demasiado cerca del fondo del valle (≤ 0.15) los gutters
+        # estrechos —típicos cuando la encuadernación no genera moteado— dan
+        # un ancho de hueco insuficiente y se rechazan; si se pone cerca del
+        # pico (≥ 0.80) cualquier rebaje de densidad se cuenta como gutter y
+        # el separador se desplaza dentro del cuerpo de texto.
+        gutter_thr = vv + (lp - vv) * 0.5
+        gL = peaks[i]
+        while gL < vi and v_sm[gL] >= gutter_thr:
+            gL += 1
+        gR = peaks[i + 1]
+        while gR > vi and v_sm[gR] >= gutter_thr:
+            gR -= 1
+        if gR <= gL or (gR - gL) < max(40, W // 20):
             continue
         if total_ink > 0:
             if v_sm[:vi].sum() / total_ink < 0.20 or v_sm[vi:].sum() / total_ink < 0.20:
                 continue
-        separators.append(vi)
+        sep_x = (gL + gR) // 2
+        separators.append(sep_x)
 
     if len(separators) > max_n_cols - 1:
         def _depth(vi):
@@ -387,29 +375,39 @@ def segment_all(
                 line_ys     = detect_lines(sub_cell, cfg)
                 para_groups = _group_into_paragraphs(line_ys, threshold_factor=para_split)
 
+                # Calcular el x-extent UNA VEZ por sub-sección, sobre TODAS las
+                # líneas detectadas. Calcularlo por párrafo (como antes) hace
+                # que un párrafo encabezado por una línea sangrada (p. ej.
+                # "Apretó el instrumento.") fije `para_x0` al borde de la
+                # sangría; las líneas siguientes del párrafo, que llegan al
+                # margen real de la columna, quedan cortadas por la izquierda.
+                sx0_sub  = max(0, x0 - margin)
+                sx1_sub  = min(W, x1 + margin)
+                if line_ys:
+                    sub_y0 = abs_y_base + line_ys[0][0]
+                    sub_y1 = abs_y_base + line_ys[-1][1]
+                else:
+                    sub_y0 = abs_y_base
+                    sub_y1 = y0 + sc_y1
+                ink_cols_sub = np.where(
+                    (binary[max(0, sub_y0): min(H, sub_y1), sx0_sub:sx1_sub] < 128).any(axis=0)
+                )[0]
+                if len(ink_cols_sub) == 0:
+                    continue
+                sub_x0 = max(0, sx0_sub + int(ink_cols_sub[0])  - margin)
+                sub_x1 = min(W, sx0_sub + int(ink_cols_sub[-1]) + 1 + margin)
+
                 for para_lines in para_groups:
                     if not para_lines:
                         continue
                     abs_y0 = abs_y_base + para_lines[0][0]
                     abs_y1 = abs_y_base + para_lines[-1][1]
 
-                    y_pad    = max(4, (abs_y1 - abs_y0) // 12)
-                    scan_y0  = max(0, abs_y0 - y_pad)
-                    scan_y1  = min(H, abs_y1 + y_pad)
-                    overflow = max(margin, W // 40)
-                    sx0      = max(0, x0 - margin)
-                    sx1      = min(W, x1 + overflow)
-                    ink_cols = np.where((binary[scan_y0:scan_y1, sx0:sx1] < 128).any(axis=0))[0]
-                    if len(ink_cols) == 0:
-                        continue
-
-                    para_x0   = max(0, sx0 + int(ink_cols[0])  - margin)
-                    para_x1   = min(W, sx0 + int(ink_cols[-1]) + 1 + margin)
-                    para_cell = binary[abs_y0:abs_y1, para_x0:para_x1]
+                    para_cell = binary[abs_y0:abs_y1, sub_x0:sub_x1]
                     if para_cell.size == 0 or not (para_cell < 128).any():
                         continue
 
-                    block_lines = [(abs_y_base + yt, abs_y_base + yb, para_x0, para_x1)
+                    block_lines = [(abs_y_base + yt, abs_y_base + yb, sub_x0, sub_x1)
                                    for (yt, yb) in para_lines]
 
                     # accent_guard: margen superior extra para que expand_all_boxes
@@ -417,7 +415,7 @@ def segment_all(
                     # del y_top detectado en la primera línea del párrafo.
                     para_h       = abs_y1 - abs_y0
                     accent_guard = max(5, int(para_h * 0.08))
-                    all_blocks.append(((max(0, abs_y0 - accent_guard), abs_y1, para_x0, para_x1), block_lines))
+                    all_blocks.append(((max(0, abs_y0 - accent_guard), abs_y1, sub_x0, sub_x1), block_lines))
 
     all_blocks = _merge_close_blocks(binary, all_blocks, merge_gap, margin)
 
@@ -514,8 +512,18 @@ def deskew_image(
     M = cv2.getRotationMatrix2D((w // 2, h // 2), median_angle, 1.0)
     border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
     bg_val        = int(np.median(border_pixels))
+    # Interpolación CÚBICA en grises. Antes se usaba INTER_NEAREST aquí mismo y
+    # eso producía aliasing fuerte: cada píxel rotado tomaba el valor del más
+    # cercano de la cuadrícula original sin promediar, así que en ángulos no
+    # múltiplos de 90° las letras quedaban "movidas" — los bordes oblicuos se
+    # convertían en una escalera de saltos discretos en vez de un degradado.
+    # Tras la binarización Sauvola (que reacciona localmente a esos saltos)
+    # esa escalera se transforma en bordes irregulares y caracteres torcidos.
+    # INTER_CUBIC reconstruye cada píxel con una vecindad 4×4 ponderada, así
+    # los bordes en gris quedan suavizados y Sauvola produce binarios mucho
+    # más limpios. Se usa NEAREST en cambio para imágenes ya binarizadas.
     corrected     = cv2.warpAffine(gray, M, (w, h),
-                                   flags=cv2.INTER_NEAREST,
+                                   flags=cv2.INTER_CUBIC,
                                    borderMode=cv2.BORDER_CONSTANT,
                                    borderValue=bg_val)
     return corrected, median_angle
@@ -582,27 +590,25 @@ def _process_strip(
 ) -> "tuple | None":
     """
     Núcleo de procesado de una franja binaria de línea:
-    oriented-crop -> straighten_line -> normalize_line -> filtro de tinta mínima.
+      oriented-crop -> straighten_line -> trim_orphan_components -> trim vertical
+      -> normalize_line -> filtro de tinta mínima.
 
-    Retorna (norm, ang, new_top, new_bot, processed_strip) o None si debe descartarse.
+    Devuelve (norm, ang, new_top, new_bot, clean_strip) o None si debe descartarse.
+      - norm: array float32 [0,1] de altura fija (para OCR).
+      - ang: ángulo de rotación oriented (informativo).
+      - new_top, new_bot: rango Y dentro del strip ORIGINAL que cubre la línea
+        principal una vez ajustada a la tinta real (sin huérfanos).
+      - clean_strip: strip uint8 binarizado y limpio (rotado/straightened y sin
+        tinta de líneas vecinas), recortado al rango Y de la línea principal.
+        Listo para guardar como JPG.
     """
     if strip.size == 0:
         return None
 
-    # Capturar alto y métricas sobre el strip ORIGINAL (antes de rotar/straighten).
-    # Calculamos new_top/new_bot en el sistema de coordenadas del crop original
-    # y luego aplicamos las transformaciones para generar `processed_strip`.
     orig_strip_h = strip.shape[0]
     rows_orig = np.where((strip < 128).any(axis=1))[0]
     if rows_orig.size == 0:
         return None
-
-    ink_top_orig = int(rows_orig[0])
-    ink_bot_orig = int(rows_orig[-1]) + 1
-    ink_h = ink_bot_orig - ink_top_orig
-    pad_orig = max(cfg.trim_margin, int(ink_h * 0.10))
-    new_top_orig = max(0, ink_top_orig - pad_orig)
-    new_bot_orig = min(orig_strip_h, ink_bot_orig + pad_orig)
 
     ang = 0.0
     if getattr(cfg, "use_oriented_crop", False):
@@ -611,15 +617,6 @@ def _process_strip(
             rstrip, ang = rotate_strip_by_baseline(strip, n_slices=cfg.straighten_slices)
             if rstrip is not None and rstrip.size > 0:
                 strip = rstrip
-                if cfg.debug and abs(ang) > 0.05:
-                    try:
-                        dbg_dir = Path(cfg.debug_dir)
-                        dbg_dir.mkdir(parents=True, exist_ok=True)
-                        ok, buf = cv2.imencode(".png", strip)
-                        if ok:
-                            (dbg_dir / f"rotated_{label}.png").write_bytes(buf.tobytes())
-                    except Exception:
-                        pass
         except Exception:
             ang = 0.0
 
@@ -627,8 +624,44 @@ def _process_strip(
         strip = straighten_line(strip, poly_degree=cfg.straighten_poly,
                                 n_slices=cfg.straighten_slices)
 
+    # Limpieza de huérfanos: elimina descenders/ascenders/manchas de líneas
+    # adyacentes que se cuelan en el padding superior o inferior del strip.
+    if getattr(cfg, "trim_orphans_per_line", True):
+        strip = trim_orphan_components(strip)
+
+    # Recorte vertical apretado a la banda principal (con margen mínimo) sobre
+    # el strip ya limpio. Esto define new_top/new_bot que se usarán para
+    # mapear el bbox al sistema de coordenadas del binary global.
+    rows_clean = np.where((strip < 128).any(axis=1))[0]
+    if rows_clean.size == 0:
+        return None
+    ink_top = int(rows_clean[0])
+    ink_bot = int(rows_clean[-1]) + 1
+    pad     = max(cfg.trim_margin, 2)
+    new_top = max(0, ink_top - pad)
+    new_bot = min(strip.shape[0], ink_bot + pad)
+
+    clean_strip = strip[new_top:new_bot, :]
+
+    # Recorte HORIZONTAL apretado al rango con tinta. Sin esto, una línea
+    # corta de fin de párrafo (p. ej. "necía.") queda como una mancha de
+    # ~100 px de tinta en un lienzo de ~572 px (el ancho del bloque); tras
+    # normalize_line + redimensionado a altura fija, la fracción de tinta
+    # cae por debajo del 0.02 que exige el filtro final, y la línea se
+    # descarta erróneamente. Recortando primero por columnas con tinta, la
+    # densidad se recupera y la línea pasa el filtro.
+    cols_clean = np.where((clean_strip < 128).any(axis=0))[0]
+    if cols_clean.size == 0:
+        return None
+    ink_left  = int(cols_clean[0])
+    ink_right = int(cols_clean[-1]) + 1
+    pad_h     = max(cfg.trim_margin, 2)
+    cl_left   = max(0,                       ink_left  - pad_h)
+    cl_right  = min(clean_strip.shape[1],    ink_right + pad_h)
+    clean_strip = clean_strip[:, cl_left:cl_right]
+
     try:
-        norm = normalize_line(strip, target_height=cfg.target_height,
+        norm = normalize_line(clean_strip, target_height=cfg.target_height,
                               trim_margin=cfg.trim_margin)
     except Exception as e:
         warns.append(f"Error normalizando {label}: {e}")
@@ -637,9 +670,12 @@ def _process_strip(
     if float((norm < 0.5).mean()) < 0.02:
         return None
 
-    # Devolver las coordenadas relativas al strip ORIGINAL y el strip procesado
-    # (posible rotado/straightened) para normalización.
-    return norm, ang, new_top_orig, new_bot_orig, strip
+    # Las coordenadas new_top/new_bot están en el sistema del strip POSIBLEMENTE
+    # rotado. Se devuelven tal cual; pipeline.run las usa relativas al strip
+    # original al construir el bbox global, asumiendo que el rotado preserva
+    # aproximadamente las coordenadas (estamos hablando de ángulos < 5° en
+    # general). Esa aproximación es suficiente para visualización del bbox.
+    return norm, ang, new_top, new_bot, clean_strip
 
 
 def _process_with_block_deskew(
@@ -648,19 +684,22 @@ def _process_with_block_deskew(
     cfg:          PipelineConfig,
     warns:        list[str],
     global_angle: float = 0.0,
-) -> tuple[list[np.ndarray], list[tuple[int, int, int, int]]]:
+) -> tuple[list[np.ndarray], list[np.ndarray], list[tuple[int, int, int, int]]]:
     """
     Para cada bloque: deskew local residual -> re-detección de líneas -> expand -> straighten -> normalize.
 
     El deskew global ya fue aplicado sobre toda la imagen antes de llamar aquí.
     La corrección local solo se aplica cuando el crop es suficientemente alto
     (≥ block_min_h_for_skew) y el ángulo residual supera block_residual_threshold.
+
+    Retorna (lines_normalized, line_crops_uint8, line_boxes).
     """
     if cfg.debug:
         print(f"[_process_with_block_deskew] {len(block_boxes)} bloques  "
               f"global_angle={global_angle:.2f}°")
 
     lines:       list[np.ndarray]               = []
+    line_crops:  list[np.ndarray]               = []
     valid_boxes: list[tuple[int, int, int, int]] = []
     H_bin        = binary.shape[0]
     min_h_local  = getattr(cfg, "block_min_h_for_skew",     60)
@@ -681,7 +720,6 @@ def _process_with_block_deskew(
 
         crop_h  = crop.shape[0]
         rotated = crop
-        angle   = 0.0
         if crop_h >= min_h_local:
             residual = estimate_block_skew(crop, max_angle=cfg.deskew_block_max_angle)
             if abs(residual) >= residual_thr:
@@ -690,14 +728,9 @@ def _process_with_block_deskew(
                 rotated  = cv2.warpAffine(crop, M, (W_c, H_c),
                                           flags=cv2.INTER_NEAREST,
                                           borderMode=cv2.BORDER_CONSTANT, borderValue=255)
-                angle = residual
                 if cfg.debug:
                     print(f"  [deskew_blocks] y=[{by0},{by1}] x=[{bx0},{bx1}] "
                           f"h={crop_h}px residual={residual:.2f}° → corregido")
-            else:
-                if cfg.debug:
-                    print(f"  [deskew_blocks] y=[{by0},{by1}] x=[{bx0},{bx1}] "
-                          f"h={crop_h}px residual={residual:.2f}° < {residual_thr}° → sin corrección")
 
         line_ys = detect_lines(rotated, cfg)
         if not line_ys:
@@ -744,28 +777,56 @@ def _process_with_block_deskew(
             result     = _process_strip(orig_strip, cfg, warns, label=label)
             if result is None:
                 continue
-            norm, ang, new_top, new_bot, _ = result
+            norm, _ang, new_top, new_bot, clean_strip = result
             lines.append(norm)
-            try:
-                # Acotar vert_pad: un ángulo de rotación grande en un strip muy
-                # ancho puede generar un padding vertical que solapa con el box
-                # de la línea adyacente. Se limita a 10% de la altura del strip.
-                raw_vpad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * orig_strip.shape[1] / 2.0))
-                vert_pad = min(raw_vpad, max(2, orig_strip.shape[0] // 10))
-            except Exception:
-                vert_pad = 0
-            # Añadir padding vertical seguro basado en la altura de la línea
-            try:
-                line_h = int(max(0, new_bot - new_top))
-                safe_pad = max(cfg.trim_margin, int(round(line_h * cfg.vertical_safe_pad_frac)))
-            except Exception:
-                safe_pad = cfg.trim_margin
-            vert_pad_total = vert_pad + safe_pad
-            g_top = max(0,     crop_y0 + yt + new_top - vert_pad_total)
-            g_bot = min(H_bin, crop_y0 + yt + new_bot + vert_pad_total)
+            line_crops.append(clean_strip)
+            # bbox global apretado: new_top/new_bot ya están ajustados a la
+            # tinta limpia del strip, sin padding extra. NO añadimos safe_pad
+            # ni vert_pad: eso era lo que causaba que los bbox absorbieran
+            # descenders/ascenders de las líneas vecinas.
+            g_top = max(0,     crop_y0 + yt + new_top)
+            g_bot = min(H_bin, crop_y0 + yt + new_bot)
             valid_boxes.append((g_top, g_bot, bx0 + xl, bx0 + xr))
 
-    return lines, valid_boxes
+    # Deduplicación entre bloques solapados. `segment_all` añade un margen
+    # superior `accent_guard` a cada bloque para que `expand_to_ink` pueda
+    # alcanzar acentos; cuando dos bloques contiguos quedan separados por una
+    # distancia menor que ese margen (típico cuando el detector partió la
+    # página en tres tramos: sup, medio, inf), las primeras líneas del tramo
+    # inferior caen también dentro del padding del tramo superior. detect_lines
+    # las captura dos veces — una por bloque — generando crops idénticos.
+    # Aquí descartamos las repetidas comparando por bbox: si la última línea
+    # añadida cubre prácticamente la misma zona Y/X que la actual, conservamos
+    # la primera y omitimos la segunda.
+    if len(valid_boxes) >= 2:
+        dedup_lines:  list[np.ndarray] = []
+        dedup_crops:  list[np.ndarray] = []
+        dedup_boxes:  list[tuple[int, int, int, int]] = []
+        order = sorted(range(len(valid_boxes)),
+                       key=lambda i: (valid_boxes[i][2], valid_boxes[i][0]))
+        seen: list[tuple[int, int, int, int]] = []
+        for i in order:
+            yt, yb, xl, xr = valid_boxes[i]
+            is_dup = False
+            for (sy0, sy1, sx0, sx1) in seen:
+                if abs(xl - sx0) > 30 or abs(xr - sx1) > 30:
+                    continue  # columnas distintas
+                inter = max(0, min(yb, sy1) - max(yt, sy0))
+                union = max(yb, sy1) - min(yt, sy0)
+                if union > 0 and inter / union >= 0.60:
+                    is_dup = True
+                    break
+            if is_dup:
+                continue
+            dedup_lines.append(lines[i])
+            dedup_crops.append(line_crops[i])
+            dedup_boxes.append(valid_boxes[i])
+            seen.append(valid_boxes[i])
+        lines       = dedup_lines
+        line_crops  = dedup_crops
+        valid_boxes = dedup_boxes
+
+    return lines, line_crops, valid_boxes
 
 
 # 5. ORQUESTADOR PRINCIPAL
@@ -777,7 +838,8 @@ def run(
     """
     Ejecuta el pipeline completo sobre una imagen o ruta de archivo.
     Si cfg es None se llama a auto_config() automáticamente.
-    Camino A (estándar): deskew global → binarización → segmentación → straighten → normalize.
+    Camino A (estándar): deskew global → binarización → mask binding →
+                         segmentación → straighten → trim huérfanos → normalize.
     Camino B (deskew_blocks): igual que A pero con corrección local de inclinación por bloque.
     """
     warns: list[str] = []
@@ -810,6 +872,20 @@ def run(
     if cfg.min_component_area > 0:
         binary = filter_small_components(binary, cfg.min_component_area)
 
+    # Enmascarar las franjas oscuras laterales (encuadernación / borde del libro)
+    # ANTES de cualquier detección de líneas o bloques. Esto pinta esas columnas
+    # a blanco en `binary`, lo que elimina el artefacto en TODA la cadena
+    # (proyecciones, bbox, crops finales) sin necesidad de parches posteriores.
+    if getattr(cfg, 'mask_binding', True):
+        binary, x_left_safe, x_right_safe = mask_binding_strips(
+            binary,
+            max_frac=cfg.binding_max_frac,
+            density_thr=cfg.binding_density_thr,
+        )
+        if cfg.debug and (x_left_safe > 0 or x_right_safe < binary.shape[1]):
+            print(f"  [pipeline] Binding enmascarado: "
+                  f"izq=[0,{x_left_safe}) der=[{x_right_safe},{binary.shape[1]})")
+
     if cfg.detect_text_blocks:
         boxes_4d, block_boxes = segment_all(binary, cfg)
     else:
@@ -820,50 +896,27 @@ def run(
 
     if len(boxes_4d) == 0 and not cfg.deskew_blocks:
         warns.append("No se detectaron líneas de texto.")
-        return PipelineResult(lines=[], line_boxes=[], block_boxes=block_boxes,
+        return PipelineResult(lines=[], line_boxes=[], line_crops=[],
+                              block_boxes=block_boxes,
                               binary=binary, deskew_angle=global_angle,
                               warnings=warns, config_used=cfg)
 
+    lines:      list[np.ndarray] = []
+    line_crops: list[np.ndarray] = []
+    valid_boxes: list[tuple[int, int, int, int]] = []
+
     if cfg.deskew_blocks and block_boxes:
-        lines, valid_boxes = _process_with_block_deskew(binary, block_boxes, cfg, warns,
-                                                        global_angle=global_angle)
-        if not lines:
-            # Fallback al camino estándar cuando deskew_blocks no extrae líneas.
+        lines, line_crops, valid_boxes = _process_with_block_deskew(
+            binary, block_boxes, cfg, warns, global_angle=global_angle,
+        )
+
+    # Camino estándar (también fallback si deskew_blocks no extrajo líneas)
+    if not lines:
+        if cfg.deskew_blocks:
             warns.append(
                 "deskew_blocks activo pero no se extrajeron líneas. "
                 "Reintentando con camino estándar (sin deskew por bloque)."
             )
-            if cfg.expand_to_ink and boxes_4d:
-                boxes_4d = expand_all_boxes(
-                    binary, boxes_4d,
-                    max_expand_frac=cfg.expand_max_frac,
-                    no_ink_gap=cfg.expand_no_ink_gap,
-                    min_ink_frac=cfg.expand_min_ink_frac,
-                    block_boxes=block_boxes,
-                )
-            lines, valid_boxes = [], []
-            for (y_top, y_bot, x_left, x_right) in boxes_4d:
-                strip        = binary[y_top:y_bot, x_left:x_right]
-                label        = f"line_y{y_top}_{y_bot}_x{x_left}"
-                result_strip = _process_strip(strip, cfg, warns, label=label)
-                if result_strip is None:
-                    continue
-                norm, ang, new_top, new_bot, processed_strip = result_strip
-                lines.append(norm)
-                try:
-                    vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * processed_strip.shape[1] / 2.0))
-                except Exception:
-                    vert_pad = 0
-                try:
-                    line_h = int(max(0, new_bot - new_top))
-                    safe_pad = max(cfg.trim_margin, int(round(line_h * cfg.vertical_safe_pad_frac)))
-                except Exception:
-                    safe_pad = cfg.trim_margin
-                vert_pad_total = vert_pad + safe_pad
-                g_top = max(0, y_top + new_top - vert_pad_total)
-                g_bot = min(binary.shape[0], y_top + new_bot + vert_pad_total)
-                valid_boxes.append((g_top, g_bot, x_left, x_left + processed_strip.shape[1]))
-    else:
         if cfg.expand_to_ink and boxes_4d:
             boxes_4d = expand_all_boxes(
                 binary, boxes_4d,
@@ -872,33 +925,24 @@ def run(
                 min_ink_frac=cfg.expand_min_ink_frac,
                 block_boxes=block_boxes,
             )
-        lines, valid_boxes = [], []
         for (y_top, y_bot, x_left, x_right) in boxes_4d:
             strip  = binary[y_top:y_bot, x_left:x_right]
             label  = f"line_y{y_top}_{y_bot}_x{x_left}"
             result = _process_strip(strip, cfg, warns, label=label)
             if result is None:
                 continue
-            norm, ang, new_top, new_bot, processed_strip = result
+            norm, _ang, new_top, new_bot, clean_strip = result
             lines.append(norm)
-            try:
-                vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * processed_strip.shape[1] / 2.0))
-            except Exception:
-                vert_pad = 0
-            try:
-                line_h = int(max(0, new_bot - new_top))
-                safe_pad = max(cfg.trim_margin, int(round(line_h * cfg.vertical_safe_pad_frac)))
-            except Exception:
-                safe_pad = cfg.trim_margin
-            vert_pad_total = vert_pad + safe_pad
-            g_top = max(0, y_top + new_top - vert_pad_total)
-            g_bot = min(binary.shape[0], y_top + new_bot + vert_pad_total)
-            valid_boxes.append((g_top, g_bot, x_left, x_left + processed_strip.shape[1]))
+            line_crops.append(clean_strip)
+            g_top = max(0, y_top + new_top)
+            g_bot = min(binary.shape[0], y_top + new_bot)
+            valid_boxes.append((g_top, g_bot, x_left, x_right))
 
     if cfg.debug:
         _save_debug(gray, binary, valid_boxes, block_boxes, cfg.debug_dir)
 
-    return PipelineResult(lines=lines, line_boxes=valid_boxes, block_boxes=block_boxes,
+    return PipelineResult(lines=lines, line_boxes=valid_boxes, line_crops=line_crops,
+                          block_boxes=block_boxes,
                           binary=binary, deskew_angle=global_angle,
                           warnings=warns, config_used=cfg)
 

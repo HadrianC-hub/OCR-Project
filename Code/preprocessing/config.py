@@ -50,9 +50,9 @@ class PipelineConfig:
     block_residual_threshold:  float = 0.5
 
     # Segmentación de líneas
-    min_line_height:   int  = 24
+    min_line_height:   int  = 14
     min_line_width:    int  = 20
-    line_merge_gap:    int  = 4
+    line_merge_gap:    int  = 1
     projection_smooth: int  = 3
     use_savgol:        bool = False
     savgol_window:     int  = 25
@@ -74,19 +74,21 @@ class PipelineConfig:
     # Normalización
     target_height: int = TARGET_HEIGHT
     trim_margin:   int = 2
-    # Fracción de la altura de línea que se añade como padding vertical de seguridad
-    # al mapear coordenadas de línea al recorte global (p. ej. para descenders).
-    vertical_safe_pad_frac: float = 0.20
 
-    # Márgenes de proyección horizontal (para excluir encuadernación u otros
-    # artefactos laterales del cómputo de proyección en detect_lines).
-    # 0.0 = sin margen extra; 0.08 = excluir 8% del ancho por ese lado.
-    projection_left_margin_frac:  float = 0.0
-    projection_right_margin_frac: float = 0.0
+    # Enmascaramiento de encuadernación / borde del libro (pintar a blanco
+    # las franjas oscuras laterales antes de detectar líneas).
+    mask_binding:             bool  = True
+    binding_max_frac:         float = 0.15
+    binding_density_thr:      float = 0.30
+
+    # Limpieza per-línea: eliminar componentes cuyo centroide Y caiga fuera de
+    # la banda principal del strip. Remueve descenders/ascenders de líneas
+    # adyacentes que se cuelan en el padding.
+    trim_orphans_per_line:    bool  = True
 
     # Detección de bloques
     detect_text_blocks:  bool  = True
-    block_col_min_depth: float = 0.28
+    block_col_min_depth: float = 0.50
     block_min_h_gap:     int   = 0
     block_h_thr_frac:    float = 0.04
     block_max_cols:      int   = 4
@@ -112,6 +114,9 @@ class PipelineConfig:
 class PipelineResult:
     lines:       list[np.ndarray]
     line_boxes:  list[tuple[int, int, int, int]]
+    # Crops uint8 de cada línea ya procesada (rotada, straightened y limpiada
+    # de tinta huérfana de líneas adyacentes). Listos para guardar como JPG.
+    line_crops:  list[np.ndarray]                = field(default_factory=list)
     block_boxes: list[tuple[int, int, int, int]] = field(default_factory=list)
     oriented_boxes: list[tuple[float, float, float, float, float]] = field(default_factory=list)
     binary:      Optional[np.ndarray]            = None

@@ -71,17 +71,22 @@ def vis_lines_detected(
 
 
 def save_line_crops(
-    img_bgr:    np.ndarray,
-    line_boxes: list,
+    line_crops: list,
     out:        Path,
     fixed_name: str = "",
 ) -> int:
-    """Recorta cada línea de la imagen original y la guarda como JPEG sin procesado adicional."""
+    """
+    Guarda como JPG cada crop de línea ya procesado por el pipeline.
+
+    `line_crops` debe ser `result.line_crops`: lista de arrays uint8 binarios,
+    rotados, straightened y limpiados de tinta huérfana de líneas vecinas.
+    El crop ya viene recortado a la banda principal de tinta, listo para
+    persistir directamente sin recálculo.
+    """
     out.mkdir(parents=True, exist_ok=True)
     saved = 0
-    for i, (y_top, y_bot, x_left, x_right) in enumerate(line_boxes, 1):
-        crop = img_bgr[y_top:y_bot, x_left:x_right]
-        if crop.size == 0:
+    for i, crop in enumerate(line_crops, 1):
+        if crop is None or crop.size == 0:
             continue
         ok, buf = cv2.imencode(".jpg", crop)
         if not ok:
@@ -228,12 +233,12 @@ def run_and_visualize(
     print("  SALIDA")
     print(_sep())
     if SINGLE_LINE_MODE:
-        n_saved = save_line_crops(binary, result.line_boxes, out, fixed_name=f"{stem}.jpg")
+        n_saved = save_line_crops(result.line_crops, out, fixed_name=f"{stem}.jpg")
         print(f"  [OK]   {n_saved} líneas → {stem}.jpg")
     else:
         lines_dir = out / stem
         vis_lines_detected(binary, result.line_boxes, result.block_boxes, out, prefix=stem + "_")
-        n_saved = save_line_crops(binary, result.line_boxes, lines_dir)
+        n_saved = save_line_crops(result.line_crops, lines_dir)
         print(f"  [OK]   {n_saved} líneas → {stem}/line_NNN.jpg")
     print()
     print(_sep("═"))
