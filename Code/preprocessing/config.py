@@ -63,8 +63,8 @@ class PipelineConfig:
     # Expansión de caja
     expand_to_ink:       bool  = True
     expand_max_frac:     float = 0.80
-    expand_no_ink_gap:   int   = 12
-    expand_min_ink_frac: float = 0.001
+    expand_no_ink_gap:   int   = 6
+    expand_min_ink_frac: float = 0.002
 
     # Enderezado per-línea
     straighten_lines:  bool = True

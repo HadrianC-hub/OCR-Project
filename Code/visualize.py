@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from preprocessing.pipeline import run, analyze, auto_config
 
 
-INPUT_PATH       = Path("Generated")
+INPUT_PATH       = Path("imagenes_3")
 OUTPUT_DIR       = Path("resultados")
-SINGLE_LINE_MODE = True
+SINGLE_LINE_MODE = False
 
 PALETTE = [
     (46,  204, 113), (52,  152, 219), (231,  76,  60),
