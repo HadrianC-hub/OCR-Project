@@ -28,9 +28,19 @@ def analyze(img: np.ndarray) -> ImageMetrics:
     mean_lum = float(gray.mean())
 
     margin  = max(10, min(H, W) // 12)
+    # Excluir franjas laterales antes de muestrear las esquinas: artefactos de
+    # encuadernación (bandas oscuras) en el borde izquierdo/derecho del escáner
+    # empujarían la media por debajo de 127 y harían dark_background=True
+    # aunque el fondo real de la página sea blanco.
+    border_frac = max(0.06, min(0.15, 100.0 / max(W, 1)))
+    cx0 = int(W * border_frac)
+    cx1 = W - cx0
+    gray_c = gray[:, cx0:cx1]
+    Wc     = gray_c.shape[1]
+    cm     = max(1, min(margin, Wc // 2, H // 2))
     corners = np.concatenate([
-        gray[:margin, :margin].ravel(),     gray[:margin, W - margin:].ravel(),
-        gray[H - margin:, :margin].ravel(), gray[H - margin:, W - margin:].ravel(),
+        gray_c[:cm,  :cm].ravel(),        gray_c[:cm,  Wc - cm:].ravel(),
+        gray_c[H-cm:, :cm].ravel(),       gray_c[H-cm:, Wc - cm:].ravel(),
     ])
     dark_background = float(corners.mean()) < 127
 
@@ -80,6 +90,26 @@ def analyze(img: np.ndarray) -> ImageMetrics:
     )
 
 
+def _detect_binding_margin(img: np.ndarray, W: int, side: str) -> float:
+    """
+    Detecta si hay una franja oscura de encuadernación en el borde izquierdo o
+    derecho de la imagen. Devuelve la fracción de ancho a excluir de la proyección
+    horizontal para que detect_lines no vea esa franja como tinta real.
+    """
+    gray_tmp = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    probe_w  = max(40, W // 12)
+    center_mean = float(gray_tmp[:, W // 4: 3 * W // 4].mean())
+    if center_mean < 1.0:
+        return 0.03
+    if side == "left":
+        edge_mean = float(gray_tmp[:, :probe_w].mean())
+    else:
+        edge_mean = float(gray_tmp[:, W - probe_w:].mean())
+    # Si el borde lateral es notablemente más oscuro que el centro (papel), es
+    # un artefacto de encuadernación: excluir ~8% del ancho.
+    return 0.08 if edge_mean < center_mean * 0.60 else 0.03
+
+
 def auto_config(img: np.ndarray) -> PipelineConfig:
     m = analyze(img)
 
@@ -109,10 +139,15 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
         use_adaptive_component_filter=False,
         use_remove_bg=False,
         line_v_dilation=max(2, int(m.estimated_text_h * 0.12)),
+        # min_line_height: valor adaptativo basado en la altura estimada del texto.
+        # El defecto (24px) es demasiado alto para texto comprimido o baja resolución.
+        min_line_height=max(8, int(m.estimated_text_h * 0.35)),
         expand_to_ink=True,
         straighten_lines=True,
         deskew=True,
         deskew_blocks=True,
+        projection_left_margin_frac=_detect_binding_margin(img, m.W, side="left"),
+        projection_right_margin_frac=_detect_binding_margin(img, m.W, side="right"),
     )
 
 
@@ -155,6 +190,23 @@ def _find_column_separators(
     min_col_dist  = max(W // 4, 80)
 
     v_proj = (binary < 128).astype(np.float64).sum(axis=0)
+
+    # Suprimir picos de artefacto de encuadernación en los bordes laterales.
+    # Si una franja lateral tiene una densidad media > 1.5× la del centro, es
+    # un artefacto (banda de escáner, encuadernación) y su amplitud inflaría
+    # v_max haciendo que los picos reales de las columnas no superen el umbral
+    # del 10%. Se reemplaza con la densidad media del tramo contiguo hacia el
+    # centro para no distorsionar tampoco el cálculo de total_ink.
+    probe_cols   = max(40, W // 12)
+    center_mean  = float(v_proj[W // 4: 3 * W // 4].mean()) if W >= 4 else 1.0
+    if center_mean > 0:
+        if float(v_proj[:probe_cols].mean()) > center_mean * 1.5:
+            fill_val = float(v_proj[probe_cols: probe_cols * 2].mean())
+            v_proj[:probe_cols] = min(fill_val, center_mean)
+        if float(v_proj[W - probe_cols:].mean()) > center_mean * 1.5:
+            fill_val = float(v_proj[W - probe_cols * 2: W - probe_cols].mean())
+            v_proj[W - probe_cols:] = min(fill_val, center_mean)
+
     v_sm   = uniform_filter(v_proj, size=smooth_size)
     v_max  = float(v_sm.max())
     if v_max == 0:
@@ -537,6 +589,21 @@ def _process_strip(
     if strip.size == 0:
         return None
 
+    # Capturar alto y métricas sobre el strip ORIGINAL (antes de rotar/straighten).
+    # Calculamos new_top/new_bot en el sistema de coordenadas del crop original
+    # y luego aplicamos las transformaciones para generar `processed_strip`.
+    orig_strip_h = strip.shape[0]
+    rows_orig = np.where((strip < 128).any(axis=1))[0]
+    if rows_orig.size == 0:
+        return None
+
+    ink_top_orig = int(rows_orig[0])
+    ink_bot_orig = int(rows_orig[-1]) + 1
+    ink_h = ink_bot_orig - ink_top_orig
+    pad_orig = max(cfg.trim_margin, int(ink_h * 0.10))
+    new_top_orig = max(0, ink_top_orig - pad_orig)
+    new_bot_orig = min(orig_strip_h, ink_bot_orig + pad_orig)
+
     ang = 0.0
     if getattr(cfg, "use_oriented_crop", False):
         try:
@@ -570,18 +637,9 @@ def _process_strip(
     if float((norm < 0.5).mean()) < 0.02:
         return None
 
-    rows = np.where((strip < 128).any(axis=1))[0]
-    if rows.size == 0:
-        return None
-
-    ink_top = int(rows[0])
-    ink_bot = int(rows[-1]) + 1
-    ink_h   = ink_bot - ink_top
-    pad     = max(cfg.trim_margin, int(ink_h * 0.10))
-    new_top = max(0, ink_top - pad)
-    new_bot = min(strip.shape[0], ink_bot + pad)
-
-    return norm, ang, new_top, new_bot, strip
+    # Devolver las coordenadas relativas al strip ORIGINAL y el strip procesado
+    # (posible rotado/straightened) para normalización.
+    return norm, ang, new_top_orig, new_bot_orig, strip
 
 
 def _process_with_block_deskew(
@@ -658,20 +716,27 @@ def _process_with_block_deskew(
         bW          = rotated.shape[1]
         boxes_local = [(yt, yb, 0, bW) for (yt, yb) in line_ys]
         if cfg.expand_to_ink:
-            accent_margin = min(pad_v, rotated.shape[0] // 2)
-            safe_y0       = max(0, block_top_in_crop - accent_margin)
+            # accent_margin: margen pequeño para capturar acentos/ascendentes que
+            # sobresalen levemente del y_top detectado. NO debe ser tan grande como
+            # pad_v (que sirve para cargar contexto de líneas adyacentes), porque
+            # si safe_crop abarca múltiples secciones, expand_all_boxes puede cruzar
+            # la frontera del bloque y generar cajas enormes que mezclan párrafos.
+            accent_margin = min(20, max(5, int(block_h * 0.02)))
+            safe_y0       = max(0,               block_top_in_crop - accent_margin)
             safe_y1       = min(rotated.shape[0], block_bot_in_crop + accent_margin)
             safe_crop     = rotated[safe_y0:safe_y1, :]
             boxes_in_safe = [(yt - safe_y0, yb - safe_y0, xl, xr)
-                             for (yt, yb, xl, xr) in boxes_local]
-            expanded    = expand_all_boxes(
-                safe_crop, boxes_in_safe,
-                max_expand_frac=cfg.expand_max_frac,
-                no_ink_gap=cfg.expand_no_ink_gap,
-                min_ink_frac=cfg.expand_min_ink_frac,
-            )
-            boxes_local = [(yt + safe_y0, yb + safe_y0, xl, xr)
-                           for (yt, yb, xl, xr) in expanded]
+                             for (yt, yb, xl, xr) in boxes_local
+                             if safe_y0 <= yt and yb <= safe_y1]
+            if boxes_in_safe:
+                expanded    = expand_all_boxes(
+                    safe_crop, boxes_in_safe,
+                    max_expand_frac=cfg.expand_max_frac,
+                    no_ink_gap=cfg.expand_no_ink_gap,
+                    min_ink_frac=cfg.expand_min_ink_frac,
+                )
+                boxes_local = [(yt + safe_y0, yb + safe_y0, xl, xr)
+                               for (yt, yb, xl, xr) in expanded]
 
         for (yt, yb, xl, xr) in boxes_local:
             orig_strip = rotated[yt:yb, xl:xr]
@@ -682,11 +747,22 @@ def _process_with_block_deskew(
             norm, ang, new_top, new_bot, _ = result
             lines.append(norm)
             try:
-                vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * orig_strip.shape[1] / 2.0))
+                # Acotar vert_pad: un ángulo de rotación grande en un strip muy
+                # ancho puede generar un padding vertical que solapa con el box
+                # de la línea adyacente. Se limita a 10% de la altura del strip.
+                raw_vpad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * orig_strip.shape[1] / 2.0))
+                vert_pad = min(raw_vpad, max(2, orig_strip.shape[0] // 10))
             except Exception:
                 vert_pad = 0
-            g_top = max(0,     crop_y0 + yt + new_top - vert_pad)
-            g_bot = min(H_bin, crop_y0 + yt + new_bot + vert_pad)
+            # Añadir padding vertical seguro basado en la altura de la línea
+            try:
+                line_h = int(max(0, new_bot - new_top))
+                safe_pad = max(cfg.trim_margin, int(round(line_h * cfg.vertical_safe_pad_frac)))
+            except Exception:
+                safe_pad = cfg.trim_margin
+            vert_pad_total = vert_pad + safe_pad
+            g_top = max(0,     crop_y0 + yt + new_top - vert_pad_total)
+            g_bot = min(H_bin, crop_y0 + yt + new_bot + vert_pad_total)
             valid_boxes.append((g_top, g_bot, bx0 + xl, bx0 + xr))
 
     return lines, valid_boxes
@@ -778,8 +854,14 @@ def run(
                     vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * processed_strip.shape[1] / 2.0))
                 except Exception:
                     vert_pad = 0
-                g_top = max(0, y_top + new_top - vert_pad)
-                g_bot = min(binary.shape[0], y_top + new_bot + vert_pad)
+                try:
+                    line_h = int(max(0, new_bot - new_top))
+                    safe_pad = max(cfg.trim_margin, int(round(line_h * cfg.vertical_safe_pad_frac)))
+                except Exception:
+                    safe_pad = cfg.trim_margin
+                vert_pad_total = vert_pad + safe_pad
+                g_top = max(0, y_top + new_top - vert_pad_total)
+                g_bot = min(binary.shape[0], y_top + new_bot + vert_pad_total)
                 valid_boxes.append((g_top, g_bot, x_left, x_left + processed_strip.shape[1]))
     else:
         if cfg.expand_to_ink and boxes_4d:
@@ -803,8 +885,14 @@ def run(
                 vert_pad = int(np.ceil(abs(np.sin(np.radians(float(ang)))) * processed_strip.shape[1] / 2.0))
             except Exception:
                 vert_pad = 0
-            g_top = max(0, y_top + new_top - vert_pad)
-            g_bot = min(binary.shape[0], y_top + new_bot + vert_pad)
+            try:
+                line_h = int(max(0, new_bot - new_top))
+                safe_pad = max(cfg.trim_margin, int(round(line_h * cfg.vertical_safe_pad_frac)))
+            except Exception:
+                safe_pad = cfg.trim_margin
+            vert_pad_total = vert_pad + safe_pad
+            g_top = max(0, y_top + new_top - vert_pad_total)
+            g_bot = min(binary.shape[0], y_top + new_bot + vert_pad_total)
             valid_boxes.append((g_top, g_bot, x_left, x_left + processed_strip.shape[1]))
 
     if cfg.debug:

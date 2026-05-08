@@ -63,8 +63,8 @@ class PipelineConfig:
     # Expansión de caja
     expand_to_ink:       bool  = True
     expand_max_frac:     float = 0.80
-    expand_no_ink_gap:   int   = 6
-    expand_min_ink_frac: float = 0.002
+    expand_no_ink_gap:   int   = 12
+    expand_min_ink_frac: float = 0.001
 
     # Enderezado per-línea
     straighten_lines:  bool = True
@@ -74,6 +74,15 @@ class PipelineConfig:
     # Normalización
     target_height: int = TARGET_HEIGHT
     trim_margin:   int = 2
+    # Fracción de la altura de línea que se añade como padding vertical de seguridad
+    # al mapear coordenadas de línea al recorte global (p. ej. para descenders).
+    vertical_safe_pad_frac: float = 0.20
+
+    # Márgenes de proyección horizontal (para excluir encuadernación u otros
+    # artefactos laterales del cómputo de proyección en detect_lines).
+    # 0.0 = sin margen extra; 0.08 = excluir 8% del ancho por ese lado.
+    projection_left_margin_frac:  float = 0.0
+    projection_right_margin_frac: float = 0.0
 
     # Detección de bloques
     detect_text_blocks:  bool  = True

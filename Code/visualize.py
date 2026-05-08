@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from preprocessing.pipeline import run, analyze, auto_config
 
 
-INPUT_PATH       = Path("imagenes")
+INPUT_PATH       = Path("Generated")
 OUTPUT_DIR       = Path("resultados")
-SINGLE_LINE_MODE = False
+SINGLE_LINE_MODE = True
 
 PALETTE = [
     (46,  204, 113), (52,  152, 219), (231,  76,  60),
@@ -144,7 +144,7 @@ def _deskew_color(img_bgr: np.ndarray, angle: float) -> np.ndarray:
 def run_and_visualize(
     image_path: str,
     debug_dir:  str = str(OUTPUT_DIR),
-) -> None:
+) -> str:
     """
     Ejecuta el pipeline completo y emite diagnóstico por consola + archivos de salida.
 
@@ -153,6 +153,11 @@ def run_and_visualize(
             {stem}_lines_detected.jpg   ← bounding-boxes sobre imagen deskewed
             {stem}/
                 line_001.jpg … line_NNN.jpg
+
+    Retorna:
+        "ok"              → procesada correctamente
+        "skipped"         → SINGLE_LINE_MODE activo y se detectaron ≠ 1 líneas (omitida)
+        "error"           → fallo de lectura u otro error grave
     """
     stem = Path(image_path).stem
     print()
@@ -166,7 +171,7 @@ def run_and_visualize(
     img_bgr = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img_bgr is None:
         print(f"  ERROR: no se pudo leer '{image_path}'")
-        return
+        return "error"
     h, w = img_bgr.shape[:2]
     print(f"  Imagen: {w}×{h} px")
 
@@ -192,10 +197,12 @@ def run_and_visualize(
     if SINGLE_LINE_MODE and result.n_lines != 1:
         print(_sep())
         if result.n_lines == 0:
-            print(f"  [!]  SINGLE_LINE_MODE: no se detectó ninguna línea en '{Path(image_path).name}'")
+            print(f"  [SKIP]  0 líneas detectadas — imagen omitida.")
         else:
-            print(f"  [!]  SINGLE_LINE_MODE: se esperaba 1 línea pero se detectaron "
-                  f"{result.n_lines} en '{Path(image_path).name}'")
+            print(f"  [SKIP]  {result.n_lines} líneas detectadas (se esperaba 1) — imagen omitida.")
+        print(_sep("═"))
+        print()
+        return "skipped"
 
     deskew_angle = getattr(result, 'deskew_angle', 0.0)
     img_vis      = _deskew_color(img_bgr, deskew_angle)
@@ -231,19 +238,24 @@ def run_and_visualize(
     print()
     print(_sep("═"))
     print()
+    return "ok"
 
 
-def _process_one(img_path: Path, output_dir: Path, quiet: bool = False) -> tuple[str, bool, str]:
+def _process_one(img_path: Path, output_dir: Path, quiet: bool = False) -> tuple[str, str, str]:
+    """
+    Retorna (nombre, status, traceback_si_error).
+    status: "ok" | "skipped" | "error"
+    """
     try:
         if quiet:
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                run_and_visualize(str(img_path), str(output_dir))
+                status = run_and_visualize(str(img_path), str(output_dir))
         else:
-            run_and_visualize(str(img_path), str(output_dir))
-        return (img_path.name, True, "")
+            status = run_and_visualize(str(img_path), str(output_dir))
+        return (img_path.name, status or "ok", "")
     except Exception:
-        return (img_path.name, False, traceback.format_exc())
+        return (img_path.name, "error", traceback.format_exc())
 
 
 def run_batch(input_dir: Path, output_dir: Path) -> None:
@@ -268,17 +280,27 @@ def run_batch(input_dir: Path, output_dir: Path) -> None:
     t0      = time.time()
     results = []
     for i, img in enumerate(images, 1):
-        name, ok, err = _process_one(img, output_dir)
-        results.append((name, ok, err))
-        print(f"  [{i:>3}/{len(images)}] {'OK' if ok else 'ERROR':5}  {name}")
-        if not ok:
+        name, status, err = _process_one(img, output_dir)
+        results.append((name, status, err))
+        label = {"ok": "OK", "skipped": "SKIP", "error": "ERROR"}.get(status, status.upper())
+        print(f"  [{i:>3}/{len(images)}] {label:<5}  {name}")
+        if status == "error":
             print(f"\nERROR en {name}:\n{err}", file=sys.stderr)
 
-    ok_count  = sum(1 for _, ok, _ in results if ok)
-    err_count = len(results) - ok_count
+    ok_count      = sum(1 for _, s, _ in results if s == "ok")
+    skipped_names = [n for n, s, _ in results if s == "skipped"]
+    err_count     = sum(1 for _, s, _ in results if s == "error")
+
     print(f"\n{'='*60}")
-    print(f"  Completado en {time.time()-t0:.1f}s  —  OK: {ok_count}  ERROR: {err_count}")
-    print(f"{'='*60}\n")
+    print(f"  Completado en {time.time()-t0:.1f}s")
+    print(f"  OK: {ok_count}  OMITIDAS: {len(skipped_names)}  ERROR: {err_count}")
+    print(f"{'='*60}")
+
+    if SINGLE_LINE_MODE and skipped_names:
+        print(f"\n  Imágenes omitidas por múltiples líneas detectadas ({len(skipped_names)}):")
+        for name in skipped_names:
+            print(f"    · {name}")
+    print()
 
 
 def main() -> None:
@@ -288,7 +310,10 @@ def main() -> None:
         run_batch(inp, out)
     elif inp.is_file() and inp.suffix.lower() in {".jpg", ".jpeg", ".png"}:
         out.mkdir(parents=True, exist_ok=True)
-        run_and_visualize(str(inp), str(out))
+        status = run_and_visualize(str(inp), str(out))
+        if SINGLE_LINE_MODE and status == "skipped":
+            print(f"  Imágenes omitidas por múltiples líneas detectadas (1):")
+            print(f"    · {inp.name}")
     elif inp.is_file():
         print(f"ERROR: INPUT_PATH='{inp}' no es una imagen soportada (.jpg, .jpeg, .png).", file=sys.stderr)
         sys.exit(1)

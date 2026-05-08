@@ -111,9 +111,15 @@ def detect_lines(
     else:
         text_mask_proj = text_mask.astype(np.float32)
 
-    # Proyección horizontal (excluye márgenes laterales ~3%)
-    margin_px  = max(15, W_img // 35)
-    projection = text_mask_proj[:, margin_px: W_img - margin_px].sum(axis=1)
+    # Proyección horizontal.
+    # El margen base (~3% del ancho) excluye texto de borde accidental.
+    # Si cfg indica márgenes adicionales (encuadernación detectada), se amplía
+    # para que el pico oscuro de la franja lateral no aparezca en la proyección
+    # y bloquee la detección de gaps entre líneas.
+    base_margin  = max(15, W_img // 35)
+    left_margin  = max(base_margin, int(W_img * getattr(cfg, 'projection_left_margin_frac',  0.0)))
+    right_margin = max(base_margin, int(W_img * getattr(cfg, 'projection_right_margin_frac', 0.0)))
+    projection = text_mask_proj[:, left_margin: W_img - right_margin].sum(axis=1)
 
     smooth = max(1, cfg.projection_smooth)
     if getattr(cfg, 'use_savgol', False) and smooth > 1:
