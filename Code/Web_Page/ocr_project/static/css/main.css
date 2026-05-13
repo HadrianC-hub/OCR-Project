@@ -1,0 +1,151 @@
+/* ═══════════════════════════════════════════════
+   ArchivoOCR — main.css
+   Stack: Bootstrap 5 + custom overrides
+   ═══════════════════════════════════════════════ */
+
+/* ── Base ─────────────────────────────────────── */
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex: 1;
+}
+
+/* ── Navbar ───────────────────────────────────── */
+#main-navbar {
+  backdrop-filter: blur(8px);
+}
+
+.nav-icon-btn {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  transition: background-color 0.15s, transform 0.1s;
+}
+
+.nav-icon-btn:active {
+  transform: scale(0.92);
+}
+
+/* ── Hero section ─────────────────────────────── */
+.hero-section {
+  min-height: 420px;
+  background: linear-gradient(135deg, #1a2a6c 0%, #2563eb 50%, #1d4ed8 100%);
+  padding: 4rem 1rem;
+}
+
+@media (max-width: 576px) {
+  .hero-section { min-height: 320px; padding: 2.5rem 1rem; }
+  .hero-section h1 { font-size: 2rem; }
+}
+
+/* ── Cards ────────────────────────────────────── */
+.card {
+  transition: box-shadow 0.2s;
+}
+
+.result-card:hover {
+  box-shadow: 0 4px 20px rgba(0,0,0,.12) !important;
+}
+
+/* ── Upload zone ──────────────────────────────── */
+.upload-zone {
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.upload-zone:hover {
+  border-color: #0d6efd !important;
+  background-color: #f0f6ff;
+}
+
+/* ── Facsimile viewer ─────────────────────────── */
+.facsimile-container {
+  background: #f8f9fa;
+}
+
+.facsimile-img {
+  transition: transform 0.2s ease;
+}
+
+/* ── Thumbnail strip ──────────────────────────── */
+.thumbnail-strip {
+  scrollbar-width: thin;
+}
+
+.thumb-img {
+  transition: border-color 0.15s, transform 0.15s;
+  object-fit: cover;
+}
+
+.thumb-img:hover {
+  transform: scale(1.05);
+}
+
+.thumb-active {
+  box-shadow: 0 0 0 3px rgba(13,110,253,0.35);
+}
+
+/* ── Page textarea (edit) ─────────────────────── */
+#pageTextarea {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* ── Sortable drag list ───────────────────────── */
+#sortable-list .list-group-item {
+  cursor: default;
+  user-select: none;
+}
+
+#sortable-list .list-group-item[draggable="true"]:hover {
+  background-color: #f8f9fa;
+}
+
+/* ── Flash messages ───────────────────────────── */
+#flash-messages .alert {
+  border-radius: 8px;
+}
+
+/* ── Tables ───────────────────────────────────── */
+.table > :not(caption) > * > * {
+  vertical-align: middle;
+}
+
+/* ── Sticky table headers ─────────────────────── */
+thead.sticky-top th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8f9fa;
+}
+
+/* ── Badge tweaks ─────────────────────────────── */
+.badge {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ── Scrollbar (WebKit) ───────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #ced4da; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #adb5bd; }
+
+/* ── Utility: border-dashed ───────────────────── */
+.border-dashed {
+  border-style: dashed !important;
+}
+
+/* ── Print ────────────────────────────────────── */
+@media print {
+  #main-navbar, footer, .btn, .no-print { display: none !important; }
+  .card { box-shadow: none !important; border: 1px solid #dee2e6 !important; }
+}

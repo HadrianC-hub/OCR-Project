@@ -1,0 +1,47 @@
+<!-- Download modal — included in search.html and view_document.html -->
+<div class="modal fade" id="dlModal" tabindex="-1" aria-labelledby="dlModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" id="dlModalLabel">
+          <i class="bi bi-download me-2 text-primary"></i>Descargar documento
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2" id="dlModalDocTitle"></p>
+
+        <!-- Modo de descarga -->
+        <div class="mb-3">
+          <p class="small fw-semibold mb-1 text-muted">Formato de descarga</p>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="dlFacsimile"
+                   id="dlModeText" value="0" checked>
+            <label class="form-check-label small" for="dlModeText">
+              <strong>Edición de lectura</strong>
+              <span class="d-block text-muted">Sólo el texto reflujado, maquetado como libro.</span>
+            </label>
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="radio" name="dlFacsimile"
+                   id="dlModeFacs" value="1">
+            <label class="form-check-label small" for="dlModeFacs">
+              <strong>Edición facsímil</strong>
+              <span class="d-block text-muted">Imagen original junto a la transcripción de cada página.</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Botones de formato -->
+        <div class="d-grid gap-2">
+          <a id="dlPdfBtn" href="#" class="btn btn-outline-danger">
+            <i class="bi bi-file-earmark-pdf me-2"></i>Descargar PDF
+          </a>
+          <a id="dlEpubBtn" href="#" class="btn btn-outline-primary">
+            <i class="bi bi-book me-2"></i>Descargar EPUB
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

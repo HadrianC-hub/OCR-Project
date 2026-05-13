@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Esquema XSD del formato de transcripción de ArchivoOCR (v1).
+
+  Validación opcional, no aplicada en runtime. Útil para herramientas
+  externas que quieran validar los ficheros generados.
+
+  Uso:  xmllint - -schema docs/transcript_v1.xsd path/al/page_NNN.xml
+        (sin espacio entre los dos guiones; aquí los separamos para
+        que el comentario XML no contenga la secuencia "doble-guion".)
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="unqualified">
+
+  <!-- Tipos auxiliares -->
+  <xs:simpleType name="DocType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="printed"/>
+      <xs:enumeration value="manuscript"/>
+      <xs:enumeration value=""/>            <!-- toleramos vacío -->
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="DocumentType">
+    <xs:sequence>
+      <xs:element name="Title"  type="xs:string"/>
+      <xs:element name="Author" type="xs:string"/>
+      <xs:element name="Year"   type="xs:int" minOccurs="0"/>
+      <xs:element name="Type"   type="DocType"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:int" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="PageType">
+    <xs:attribute name="order"     type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="facsimile" type="xs:string"          use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="TimestampsType">
+    <xs:sequence>
+      <xs:element name="Created"  type="xs:dateTime"/>
+      <xs:element name="Modified" type="xs:dateTime"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="RegionType">
+    <xs:attribute name="id"     type="xs:string"          use="required"/>
+    <xs:attribute name="order"  type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="x"      type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="y"      type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="width"  type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="height" type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="RegionsType">
+    <xs:sequence>
+      <xs:element name="Region" type="RegionType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="BodyType">
+    <xs:sequence>
+      <xs:element name="Line" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- Elemento raíz -->
+  <xs:element name="Transcript">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Document"   type="DocumentType"/>
+        <xs:element name="Page"       type="PageType"/>
+        <xs:element name="Timestamps" type="TimestampsType"/>
+        <xs:element name="Regions"    type="RegionsType" minOccurs="0"/>
+        <xs:element name="Body"       type="BodyType"/>
+      </xs:sequence>
+      <xs:attribute name="version" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

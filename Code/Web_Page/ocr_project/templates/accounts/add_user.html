@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Añadir usuario — ArchivoOCR{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-7 col-lg-5">
+    <h3 class="fw-bold mb-4"><i class="bi bi-person-plus me-2 text-success"></i>Añadir usuario</h3>
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4">
+        <form method="post">
+          {% csrf_token %}
+          {% for field in form %}
+          <div class="mb-3">
+            <label class="form-label small fw-semibold">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}
+              <div class="text-danger small mt-1">{{ field.errors.0 }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+          {% if form.non_field_errors %}
+            <div class="alert alert-danger small py-2">{{ form.non_field_errors.0 }}</div>
+          {% endif %}
+          <div class="d-flex gap-2 justify-content-end mt-2">
+            <a href="{% url 'user_management' %}" class="btn btn-outline-secondary">Cancelar</a>
+            <button type="submit" class="btn btn-success">
+              <i class="bi bi-person-check me-1"></i>Crear usuario
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

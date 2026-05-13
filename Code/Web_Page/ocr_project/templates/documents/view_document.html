@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ doc.title }} — ArchivoOCR{% endblock %}
+{% block main_class %}container-fluid py-3{% endblock %}
+
+{% block content %}
+
+<!-- ── Header ────────────────────────────────────────────────────────── -->
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h4 class="fw-bold mb-0">{{ doc.title }}</h4>
+    <div class="text-muted small d-flex gap-3 flex-wrap mt-1">
+      {% if doc.author %}<span><i class="bi bi-person me-1"></i>{{ doc.author }}</span>{% endif %}
+      {% if doc.year   %}<span><i class="bi bi-calendar me-1"></i>{{ doc.year }}</span>{% endif %}
+      <span><i class="bi bi-file-earmark me-1"></i>{{ doc.get_document_type_display }}</span>
+    </div>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if user.is_authenticated and user.is_worker_or_above %}
+      <a href="{% url 'edit_document' doc.id %}" class="btn btn-outline-warning btn-sm">
+        <i class="bi bi-pencil me-1"></i>Editar
+      </a>
+      <a href="{% url 'delete_document' doc.id %}" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-trash me-1"></i>Eliminar
+      </a>
+    {% endif %}
+    <button class="btn btn-outline-secondary btn-sm"
+            data-bs-toggle="modal" data-bs-target="#dlModal"
+            data-doc-id="{{ doc.id }}" data-doc-title="{{ doc.title }}">
+      <i class="bi bi-download me-1"></i>Descargar
+    </button>
+    <a href="{% url 'search' %}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Volver
+    </a>
+  </div>
+</div>
+
+<!-- ── Page navigation ───────────────────────────────────────────────── -->
+{% if total_pages > 1 %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  {% if page_num > 1 %}
+    <a href="?page={{ page_num|add:'-1' }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-chevron-left"></i> Anterior
+    </a>
+  {% endif %}
+
+  <span class="text-muted small">Página <strong>{{ page_num }}</strong> de <strong>{{ total_pages }}</strong></span>
+
+  {% if page_num < total_pages %}
+    <a href="?page={{ page_num|add:'1' }}" class="btn btn-outline-secondary btn-sm">
+      Siguiente <i class="bi bi-chevron-right"></i>
+    </a>
+  {% endif %}
+
+  <!-- Jump to page -->
+  <form method="get" class="d-flex align-items-center gap-1 ms-2">
+    <input type="number" name="page" value="{{ page_num }}" min="1" max="{{ total_pages }}"
+           class="form-control form-control-sm" style="width:70px">
+    <button class="btn btn-sm btn-outline-primary" type="submit">Ir</button>
+  </form>
+</div>
+{% endif %}
+
+<!-- ── Two-column viewer ─────────────────────────────────────────────── -->
+{% if current_page %}
+<div class="row g-3 viewer-wrapper" x-data="zoomViewer()">
+
+  <!-- Facsimile -->
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-2">
+        <span class="small fw-semibold"><i class="bi bi-image me-1"></i>Facsimilar</span>
+        <div class="d-flex gap-1">
+          <button class="btn btn-outline-secondary btn-sm" @click="zoomIn()" title="Zoom in">
+            <i class="bi bi-zoom-in"></i>
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" @click="zoomOut()" title="Zoom out">
+            <i class="bi bi-zoom-out"></i>
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" @click="resetZoom()" title="Restablecer">
+            <i class="bi bi-arrow-counterclockwise"></i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0 facsimile-container overflow-auto" style="max-height:78vh">
+        <img src="{{ current_page.image.url }}"
+             alt="Facsimilar página {{ current_page.order }}"
+             :style="'transform: scale(' + scale + '); transform-origin: top left; cursor: zoom-in; display: block;'"
+             @click="zoomIn()"
+             class="img-fluid facsimile-img p-1">
+      </div>
+    </div>
+  </div>
+
+  <!-- Text panel -->
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary py-2">
+        <span class="small fw-semibold"><i class="bi bi-file-text me-1"></i>Texto transcrito — p. {{ current_page.order }}</span>
+      </div>
+      <div class="card-body overflow-auto" style="max-height:78vh; white-space: pre-wrap; font-family: 'Georgia', serif; font-size: 0.95rem; line-height: 1.8;">
+        {% if current_page.text %}
+          {{ current_page.text }}
+        {% else %}
+          <span class="text-muted fst-italic">Esta página no tiene texto transcrito aún.</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% else %}
+  <div class="alert alert-info">Este documento no tiene páginas cargadas.</div>
+{% endif %}
+
+<!-- ── Thumbnail strip ───────────────────────────────────────────────── -->
+{% if pages|length > 1 %}
+<div class="d-flex gap-2 mt-3 overflow-auto pb-2 thumbnail-strip">
+  {% for p in pages %}
+  <a href="?page={{ p.order }}" class="flex-shrink-0">
+    <img src="{{ p.image.url }}" alt="p.{{ p.order }}"
+         class="thumb-img {% if p.order == page_num %}thumb-active{% endif %}"
+         style="height:70px; width:auto; border-radius:4px; border: 2px solid {% if p.order == page_num %}#0d6efd{% else %}#dee2e6{% endif %}">
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Download modal -->
+{% include "partials/download_modal.html" %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function zoomViewer() {
+  return {
+    scale: 1,
+    zoomIn()  { if (this.scale < 4) this.scale = +(this.scale + 0.25).toFixed(2); },
+    zoomOut() { if (this.scale > 0.5) this.scale = +(this.scale - 0.25).toFixed(2); },
+    resetZoom() { this.scale = 1; },
+  };
+}
+</script>
+{% endblock %}

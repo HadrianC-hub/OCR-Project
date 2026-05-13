@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Gestión de usuarios — ArchivoOCR{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h3 class="fw-bold mb-0"><i class="bi bi-people me-2 text-warning"></i>Gestión de usuarios</h3>
+    <p class="text-muted small mb-0">{{ users|length }} usuario(s) activos en el sistema</p>
+  </div>
+  <a href="{% url 'add_user' %}" class="btn btn-success btn-sm">
+    <i class="bi bi-person-plus me-1"></i>Añadir usuario
+  </a>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3">Usuario</th>
+          <th>Nombre</th>
+          <th>Email</th>
+          <th>Rol</th>
+          <th class="text-end pe-3">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td class="ps-3 fw-semibold">
+            {{ u.username }}
+            {% if u == request.user %}
+              <span class="badge bg-secondary ms-1 small">Tú</span>
+            {% endif %}
+            {% if u.is_super_admin %}
+              <span class="badge bg-danger ms-1 small">Principal</span>
+            {% endif %}
+          </td>
+          <td>{{ u.get_full_name|default:"—" }}</td>
+          <td class="text-muted small">{{ u.email|default:"—" }}</td>
+          <td>
+            {% if u.is_super_admin %}
+              <span class="badge bg-danger">Adm. Principal</span>
+            {% elif u.is_admin_or_above %}
+              <span class="badge bg-warning text-dark">Administrador</span>
+            {% else %}
+              <span class="badge bg-primary">Trabajador</span>
+            {% endif %}
+          </td>
+          <td class="text-end pe-3">
+            {% if not u.is_super_admin and u != request.user %}
+              <a href="{% url 'edit_user_role' u.id %}" class="btn btn-outline-warning btn-sm me-1">
+                <i class="bi bi-shield-half me-1"></i>Privilegios
+              </a>
+              <button class="btn btn-outline-danger btn-sm"
+                      data-bs-toggle="modal" data-bs-target="#delModal{{ u.id }}">
+                <i class="bi bi-person-x me-1"></i>Eliminar
+              </button>
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+        </tr>
+
+        <!-- Delete confirmation modal -->
+        {% if not u.is_super_admin and u != request.user %}
+        <div class="modal fade" id="delModal{{ u.id }}" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h6 class="modal-title text-danger">
+                  <i class="bi bi-exclamation-triangle me-2"></i>Confirmar eliminación
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body small">
+                ¿Estás seguro de que deseas eliminar al usuario <strong>{{ u.username }}</strong>?
+                Esta acción no se puede deshacer.
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <form method="post" action="{% url 'delete_user' u.id %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        {% empty %}
+        <tr><td colspan="5" class="text-center text-muted py-4">No hay usuarios en el sistema.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Eliminar documento — ArchivoOCR{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body p-4 text-center">
+        <i class="bi bi-exclamation-triangle-fill text-danger display-4 mb-3"></i>
+        <h5 class="fw-bold mb-2">¿Eliminar este documento?</h5>
+        <p class="text-muted small mb-1">
+          Estás a punto de eliminar permanentemente:
+        </p>
+        <p class="fw-semibold mb-4">« {{ doc.title }} »</p>
+        <p class="text-danger small mb-4">
+          Esta acción no se puede deshacer. Se eliminarán todas las páginas e imágenes asociadas.
+        </p>
+        <div class="d-flex gap-2 justify-content-center">
+          <a href="{% url 'view_document' doc.id %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Cancelar
+          </a>
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">
+              <i class="bi bi-trash me-1"></i>Sí, eliminar
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

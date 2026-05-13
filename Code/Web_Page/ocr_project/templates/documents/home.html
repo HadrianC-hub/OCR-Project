@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}ArchivoOCR — Inicio{% endblock %}
+
+{% block main_class %}{% endblock %}
+
+{% block content %}
+
+<!-- ── Hero ──────────────────────────────────────────────────────────── -->
+<section class="hero-section text-white text-center d-flex align-items-center justify-content-center">
+  <div>
+    <i class="bi bi-book-half display-1 mb-3 d-block"></i>
+    <h1 class="display-4 fw-bold mb-2">ArchivoOCR</h1>
+    <p class="lead mb-4 opacity-75">
+      Sistema de digitalización, transcripción y gestión documental
+    </p>
+    <a href="{% url 'search' %}" class="btn btn-light btn-lg fw-semibold px-5">
+      <i class="bi bi-search me-2"></i>Explorar documentos
+    </a>
+  </div>
+</section>
+
+<!-- ── Features ──────────────────────────────────────────────────────── -->
+<section class="container py-5">
+  <div class="row g-4 justify-content-center">
+
+    <div class="col-md-4">
+      <div class="card h-100 border-0 shadow-sm text-center p-4">
+        <i class="bi bi-file-earmark-text display-4 text-primary mb-3"></i>
+        <h5 class="fw-semibold">Digitalización precisa</h5>
+        <p class="text-muted small">
+          Tecnología OCR especializada en documentos impresos y manuscritos históricos,
+          con revisión humana para garantizar la fidelidad del texto.
+        </p>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card h-100 border-0 shadow-sm text-center p-4">
+        <i class="bi bi-search display-4 text-success mb-3"></i>
+        <h5 class="fw-semibold">Búsqueda avanzada</h5>
+        <p class="text-muted small">
+          Localiza documentos por título, autor, año o contenido textual completo.
+          Filtra por tipo de documento y accede al facsimilar original.
+        </p>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card h-100 border-0 shadow-sm text-center p-4">
+        <i class="bi bi-download display-4 text-warning mb-3"></i>
+        <h5 class="fw-semibold">Descarga en múltiples formatos</h5>
+        <p class="text-muted small">
+          Exporta cualquier documento en PDF o EPUB para su lectura y archivo fuera del sistema.
+        </p>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card h-100 border-0 shadow-sm text-center p-4">
+        <i class="bi bi-images display-4 text-info mb-3"></i>
+        <h5 class="fw-semibold">Facsimilar integrado</h5>
+        <p class="text-muted small">
+          Visualiza el texto transcrito junto al facsimilar original página a página,
+          con zoom sobre la imagen para mayor detalle.
+        </p>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card h-100 border-0 shadow-sm text-center p-4">
+        <i class="bi bi-shield-lock display-4 text-danger mb-3"></i>
+        <h5 class="fw-semibold">Control de acceso</h5>
+        <p class="text-muted small">
+          Documentos públicos accesibles para todos. Documentos privados exclusivos
+          para personal autorizado. Gestión de roles y privilegios.
+        </p>
+      </div>
+    </div>
+
+    <div class="col-md-4">
+      <div class="card h-100 border-0 shadow-sm text-center p-4">
+        <i class="bi bi-bar-chart-line display-4 text-secondary mb-3"></i>
+        <h5 class="fw-semibold">Estadísticas y trazabilidad</h5>
+        <p class="text-muted small">
+          Registro completo de todas las operaciones. Estadísticas de uso,
+          documentos más consultados y actividad por trabajador.
+        </p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ── About ─────────────────────────────────────────────────────────── -->
+<section class="bg-body-tertiary border-top border-bottom py-5">
+  <div class="container">
+    <div class="row align-items-center g-4">
+      <div class="col-md-6">
+        <h2 class="fw-bold mb-3">Sobre el proyecto</h2>
+        <p class="text-muted">
+          ArchivoOCR es una plataforma desarrollada para la digitalización, transcripción y
+          gestión de documentos históricos. Combina tecnología de reconocimiento óptico de
+          caracteres con revisión humana para ofrecer transcripciones de alta calidad.
+        </p>
+        <p class="text-muted">
+          El sistema preserva tanto el facsimilar original como el texto transcrito,
+          permitiendo la búsqueda a texto completo y la descarga en formatos estándar.
+        </p>
+      </div>
+      <div class="col-md-6 text-center">
+        <i class="bi bi-archive display-1 text-primary opacity-25"></i>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

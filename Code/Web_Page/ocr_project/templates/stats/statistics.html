@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Estadísticas — ArchivoOCR{% endblock %}
+
+{% block content %}
+<h3 class="fw-bold mb-1"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Estadísticas</h3>
+<p class="text-muted small mb-4">Actividad del sistema en los últimos 30 días.</p>
+
+<!-- ── KPI cards ─────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="display-6 fw-bold text-primary">{{ total_docs }}</div>
+      <div class="text-muted small mt-1"><i class="bi bi-files me-1"></i>Documentos totales</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="display-6 fw-bold text-success">{{ recent_inserts }}</div>
+      <div class="text-muted small mt-1"><i class="bi bi-upload me-1"></i>Inserciones (30d)</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="display-6 fw-bold text-warning">{{ recent_edits }}</div>
+      <div class="text-muted small mt-1"><i class="bi bi-pencil me-1"></i>Ediciones (30d)</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="display-6 fw-bold text-info">{{ recent_downloads }}</div>
+      <div class="text-muted small mt-1"><i class="bi bi-download me-1"></i>Descargas (30d)</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="display-6 fw-bold text-danger">{{ recent_deletions }}</div>
+      <div class="text-muted small mt-1"><i class="bi bi-trash me-1"></i>Eliminaciones (30d)</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Activity chart (last 7 days) ─────────────────────────────────── -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-body-tertiary py-2">
+    <span class="fw-semibold small"><i class="bi bi-activity me-1"></i>Actividad — últimos 7 días</span>
+  </div>
+  <div class="card-body">
+    <canvas id="activityChart" height="90"></canvas>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+
+  <!-- ── Top viewed ─────────────────────────────────────────────────── -->
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary py-2">
+        <span class="fw-semibold small"><i class="bi bi-eye me-1 text-primary"></i>Más vistos</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for doc in top_viewed %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+          <a href="{% url 'view_document' doc.id %}" class="text-truncate text-decoration-none small me-2" style="max-width:75%">
+            {{ doc.title }}
+          </a>
+          <span class="badge bg-primary rounded-pill">{{ doc.total_views }}</span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted small py-3 text-center">Sin datos aún</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- ── Top downloaded ─────────────────────────────────────────────── -->
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary py-2">
+        <span class="fw-semibold small"><i class="bi bi-download me-1 text-success"></i>Más descargados</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for doc in top_downloaded %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+          <a href="{% url 'view_document' doc.id %}" class="text-truncate text-decoration-none small me-2" style="max-width:75%">
+            {{ doc.title }}
+          </a>
+          <span class="badge bg-success rounded-pill">{{ doc.total_downloads }}</span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted small py-3 text-center">Sin datos aún</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- ── Top edited ─────────────────────────────────────────────────── -->
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary py-2">
+        <span class="fw-semibold small"><i class="bi bi-pencil me-1 text-warning"></i>Más editados</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for doc in top_edited %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+          <a href="{% url 'view_document' doc.id %}" class="text-truncate text-decoration-none small me-2" style="max-width:75%">
+            {{ doc.title }}
+          </a>
+          <span class="badge bg-warning text-dark rounded-pill">{{ doc.total_edits }}</span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted small py-3 text-center">Sin datos aún</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     ADMIN-ONLY SECTION
+══════════════════════════════════════════════════════════════════════════ -->
+{% if request.user.is_admin_or_above %}
+
+<hr class="my-4">
+<h5 class="fw-bold mb-3"><i class="bi bi-person-gear me-2 text-danger"></i>Estadísticas avanzadas — Administración</h5>
+
+<!-- KPI workers -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3">
+      <div class="display-6 fw-bold text-secondary">{{ total_workers }}</div>
+      <div class="text-muted small mt-1"><i class="bi bi-people me-1"></i>Usuarios activos</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+
+  <!-- Top inserters -->
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary py-2">
+        <span class="fw-semibold small"><i class="bi bi-upload me-1 text-success"></i>Trabajadores — más documentos insertados</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for row in top_inserters %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+          <span class="small">{{ row.user__username|default:"(eliminado)" }}</span>
+          <span class="badge bg-success rounded-pill">{{ row.total }}</span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted small py-3 text-center">Sin datos aún</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- Top editors -->
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-body-tertiary py-2">
+        <span class="fw-semibold small"><i class="bi bi-pencil me-1 text-warning"></i>Trabajadores — más documentos editados</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for row in top_editors %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-3">
+          <span class="small">{{ row.user__username|default:"(eliminado)" }}</span>
+          <span class="badge bg-warning text-dark rounded-pill">{{ row.total }}</span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted small py-3 text-center">Sin datos aún</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<!-- Operation log -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-body-tertiary py-2 d-flex justify-content-between align-items-center">
+    <span class="fw-semibold small"><i class="bi bi-journal-text me-1"></i>Registro de operaciones (últimas 200)</span>
+    <!-- Quick filter -->
+    <input type="text" id="logFilter" class="form-control form-control-sm w-auto"
+           placeholder="Filtrar…" style="max-width:200px">
+  </div>
+  <div class="table-responsive" style="max-height:420px; overflow-y:auto">
+    <table class="table table-sm table-hover align-middle mb-0" id="logTable">
+      <thead class="table-light sticky-top">
+        <tr>
+          <th class="ps-3">Fecha y hora</th>
+          <th>Usuario</th>
+          <th>Acción</th>
+          <th class="pe-3">Descripción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in operation_log %}
+        <tr>
+          <td class="ps-3 text-nowrap small text-muted">{{ log.timestamp|date:"d/m/Y H:i" }}</td>
+          <td class="small fw-semibold">{{ log.user.username|default:"—" }}</td>
+          <td>
+            {% if log.action == 'insert_doc' %}
+              <span class="badge bg-success">Inserción doc.</span>
+            {% elif log.action == 'edit_doc' %}
+              <span class="badge bg-warning text-dark">Edición doc.</span>
+            {% elif log.action == 'view_doc' %}
+              <span class="badge bg-primary">Visualización</span>
+            {% elif log.action == 'download_doc' %}
+              <span class="badge bg-info text-dark">Descarga</span>
+            {% elif log.action == 'delete_doc' %}
+              <span class="badge bg-danger">Eliminación doc.</span>
+            {% elif log.action == 'insert_user' %}
+              <span class="badge bg-success">Alta usuario</span>
+            {% elif log.action == 'remove_user' %}
+              <span class="badge bg-danger">Baja usuario</span>
+            {% elif log.action == 'edit_privileges' %}
+              <span class="badge bg-warning text-dark">Privilegios</span>
+            {% elif log.action == 'login' %}
+              <span class="badge bg-secondary">Login</span>
+            {% elif log.action == 'logout' %}
+              <span class="badge bg-secondary">Logout</span>
+            {% else %}
+              <span class="badge bg-light text-dark">{{ log.get_action_display }}</span>
+            {% endif %}
+          </td>
+          <td class="pe-3 small text-muted">{{ log.description|truncatechars:100 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" class="text-center text-muted py-4">No hay registros.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endif %}{# end admin section #}
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+// Activity sparkline
+const labels = [{% for d in daily_activity %}"{{ d.label }}"{% if not forloop.last %},{% endif %}{% endfor %}];
+const data   = [{% for d in daily_activity %}{{ d.count }}{% if not forloop.last %},{% endif %}{% endfor %}];
+
+new Chart(document.getElementById('activityChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [{
+      label: 'Operaciones',
+      data,
+      backgroundColor: 'rgba(13,110,253,0.25)',
+      borderColor: 'rgba(13,110,253,0.8)',
+      borderWidth: 2,
+      borderRadius: 6,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, ticks: { precision: 0 } },
+    }
+  }
+});
+
+// Log filter
+const logFilter = document.getElementById('logFilter');
+if (logFilter) {
+  logFilter.addEventListener('input', () => {
+    const q = logFilter.value.toLowerCase();
+    document.querySelectorAll('#logTable tbody tr').forEach(row => {
+      row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+}
+</script>
+{% endblock %}

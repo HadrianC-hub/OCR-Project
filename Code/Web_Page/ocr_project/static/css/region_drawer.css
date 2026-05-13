@@ -1,0 +1,70 @@
+/* static/css/region_drawer.css
+ *
+ * Estilos para la herramienta de regiones del editor.
+ */
+
+/* Wrapper que mantiene <img> y <canvas> superpuestos.
+   transform: scale(...) lo aplica el JS para zoom. */
+.region-drawer-wrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;          /* evita gap por baseline */
+  user-select: none;
+}
+
+.region-drawer-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  pointer-events: none;    /* todo lo controla el canvas */
+}
+
+.region-drawer-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Tamaño en píxeles CSS lo fija el JS para coincidir con la imagen. */
+  pointer-events: none;    /* lo cambia el JS al modo 'draw' */
+}
+
+/* ── Lista de regiones ──────────────────────────────────────────────── */
+
+.region-item {
+  cursor: pointer;
+  border: none;
+  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+}
+.region-item:last-child {
+  border-bottom: none;
+}
+.region-item.active-region {
+  background-color: rgba(13, 110, 253, 0.10);
+}
+.region-item.dragging {
+  opacity: 0.4;
+}
+
+.region-handle {
+  cursor: grab;
+  font-size: 1.2rem;
+  letter-spacing: -3px;
+  user-select: none;
+}
+.region-handle:active {
+  cursor: grabbing;
+}
+
+.region-color-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+.region-del-btn {
+  flex-shrink: 0;
+  padding: 0.15rem 0.45rem;
+  line-height: 1;
+}

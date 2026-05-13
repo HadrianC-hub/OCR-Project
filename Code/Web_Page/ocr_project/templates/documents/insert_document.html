@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Insertar documento — ArchivoOCR{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-10">
+
+    <h3 class="fw-bold mb-1"><i class="bi bi-plus-circle me-2 text-success"></i>Insertar nuevo documento</h3>
+    <p class="text-muted small mb-4">Sube las imágenes en orden, ajusta si es necesario y completa los metadatos.</p>
+
+    <form method="post" enctype="multipart/form-data" id="insert-form"
+          x-data="insertDoc()" @submit.prevent="submitForm">
+      {% csrf_token %}
+
+      <!-- ── Step 1: Upload images ─────────────────────────────────── -->
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-body-tertiary py-2">
+          <span class="fw-semibold"><i class="bi bi-images me-1 text-primary"></i>Paso 1 — Subir imágenes</span>
+        </div>
+        <div class="card-body">
+
+          <!-- Drop zone -->
+          <label for="imageInput"
+                 class="upload-zone d-flex flex-column align-items-center justify-content-center
+                        border border-2 border-dashed rounded p-5 mb-3 text-muted"
+                 style="cursor:pointer; min-height:160px"
+                 @dragover.prevent @drop.prevent="handleDrop($event)">
+            <i class="bi bi-cloud-upload display-4 mb-2 text-primary opacity-50"></i>
+            <span>Arrastra imágenes aquí o <u>haz clic para seleccionar</u></span>
+            <span class="small mt-1">JPG, PNG, TIFF — múltiples archivos admitidos</span>
+            <input type="file" id="imageInput" name="images" multiple accept="image/*"
+                   class="d-none" @change="handleFiles($event.target.files)">
+          </label>
+
+          <!-- Preview / reorder list -->
+          <template x-if="files.length > 0">
+            <div>
+              <p class="small text-muted mb-2">
+                Arrastra las filas para cambiar el orden. El orden final será el de las páginas del documento.
+              </p>
+              <ul class="list-group" id="sortable-list">
+                <template x-for="(f, idx) in files" :key="f.name + idx">
+                  <li class="list-group-item d-flex align-items-center gap-3 py-2"
+                      draggable="true"
+                      @dragstart="dragStart(idx)"
+                      @dragover.prevent
+                      @drop.prevent="dragDrop(idx)"
+                      :class="dragging === idx ? 'opacity-50' : ''">
+                    <i class="bi bi-grip-vertical text-muted" style="cursor:grab"></i>
+                    <img :src="f.preview" class="rounded" style="height:44px;width:auto;object-fit:cover">
+                    <span class="small text-truncate flex-grow-1" x-text="(idx+1) + '. ' + f.name"></span>
+                    <button type="button" class="btn btn-outline-danger btn-sm"
+                            @click="removeFile(idx)">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </template>
+
+          <template x-if="files.length === 0">
+            <p class="text-muted small fst-italic mb-0">No hay imágenes seleccionadas.</p>
+          </template>
+
+        </div>
+      </div>
+
+      <!-- ── Step 2: Document type ─────────────────────────────────── -->
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-body-tertiary py-2">
+          <span class="fw-semibold"><i class="bi bi-cpu me-1 text-info"></i>Paso 2 — Tipo de documento</span>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            El motor OCR adecuado se seleccionará automáticamente según el tipo elegido.
+          </p>
+          <div class="d-flex gap-4 flex-wrap">
+
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="document_type_radio"
+                     id="typeImpreso" value="printed"
+                     x-model="docType" checked>
+              <label class="form-check-label" for="typeImpreso">
+                <i class="bi bi-printer me-1"></i>
+                <strong>Impreso</strong> — libros tipografiados, documentos a máquina de escribir
+              </label>
+            </div>
+
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="document_type_radio"
+                     id="typeManuscrito" value="manuscript"
+                     x-model="docType">
+              <label class="form-check-label" for="typeManuscrito">
+                <i class="bi bi-pen me-1"></i>
+                <strong>Manuscrito</strong> — documentos escritos a mano
+              </label>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Step 3: Metadata ──────────────────────────────────────── -->
+      <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-body-tertiary py-2">
+          <span class="fw-semibold"><i class="bi bi-card-text me-1 text-warning"></i>Paso 3 — Metadatos del documento</span>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-8">
+              <label class="form-label">Título <span class="text-danger">*</span></label>
+              {{ form.title }}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Año</label>
+              {{ form.year }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Autor</label>
+              {{ form.author }}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">
+                {{ form.is_public }} Documento público
+              </label>
+              <div class="form-text">Si está desmarcado, solo los trabajadores pueden verlo.</div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Descripción</label>
+              {{ form.description }}
+            </div>
+          </div>
+
+          {% if form.errors %}
+            <div class="alert alert-danger mt-3 small">
+              {% for field, errors in form.errors.items %}
+                {% for err in errors %}<div>{{ err }}</div>{% endfor %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Hidden inputs filled by JS before submit -->
+      <input type="hidden" name="order" x-bind:value="orderString()">
+
+      <!-- Submit -->
+      <div class="d-flex gap-2 justify-content-end">
+        <a href="{% url 'home' %}" class="btn btn-outline-secondary"
+           :class="submitting ? 'disabled pe-none opacity-50' : ''"
+           :tabindex="submitting ? -1 : 0"
+           :aria-disabled="submitting">Cancelar</a>
+        <button type="submit" class="btn btn-success px-4"
+                :disabled="files.length === 0 || submitting">
+          <template x-if="!submitting">
+            <span><i class="bi bi-upload me-2"></i>Subir y procesar con OCR</span>
+          </template>
+          <template x-if="submitting">
+            <span>
+              <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+              Procesando…
+            </span>
+          </template>
+        </button>
+      </div>
+
+    </form>
+
+    <!-- ── Loading overlay (mostrado mientras se procesa el OCR) ─────── -->
+    <div class="ocr-loading-overlay"
+         x-show="submitting"
+         x-cloak
+         x-transition.opacity
+         role="alertdialog"
+         aria-live="assertive"
+         aria-modal="true"
+         aria-labelledby="ocr-loading-title">
+      <div class="ocr-loading-card text-center">
+        <div class="spinner-border text-success mb-3" style="width:3rem;height:3rem" role="status">
+          <span class="visually-hidden">Procesando…</span>
+        </div>
+        <h5 id="ocr-loading-title" class="fw-bold mb-2">Procesando documento</h5>
+        <p class="text-muted small mb-3">
+          Estamos preprocesando las imágenes y ejecutando el OCR.<br>
+          Esto puede tardar varios segundos por página, no cierres esta ventana.
+        </p>
+        <p class="text-muted small mb-0" x-show="elapsed > 0">
+          Tiempo transcurrido: <span x-text="elapsedLabel"></span>
+        </p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  [x-cloak] { display: none !important; }
+
+  .ocr-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1080;       /* por encima de modales Bootstrap (1055) */
+    background: rgba(15, 23, 42, .55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .ocr-loading-card {
+    background: var(--bs-body-bg, #fff);
+    border-radius: .75rem;
+    padding: 2rem 2.5rem;
+    max-width: 24rem;
+    width: 100%;
+    box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .25);
+  }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function insertDoc() {
+  return {
+    files: [],
+    docType: 'printed',
+    dragging: null,
+
+    // Estado de envío: cuando submitting=true bloqueamos el botón, mostramos
+    // el overlay de carga, instalamos un guard para beforeunload y rechazamos
+    // cualquier nuevo intento de submit (clic accidental doble, Enter, etc.)
+    submitting: false,
+    elapsed: 0,           // segundos transcurridos desde el envío
+    _elapsedTimer: null,
+    _beforeUnloadHandler: null,
+
+    get elapsedLabel() {
+      const m = Math.floor(this.elapsed / 60);
+      const s = this.elapsed % 60;
+      return m > 0
+        ? `${m} min ${s.toString().padStart(2, '0')} s`
+        : `${s} s`;
+    },
+
+    handleFiles(fileList) {
+      for (const f of fileList) {
+        if (!this.files.find(x => x.name === f.name)) {
+          const reader = new FileReader();
+          reader.onload = e => {
+            this.files.push({ name: f.name, preview: e.target.result, file: f });
+            // Sort initial list by name (alphanumeric, Windows default)
+            this.files.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+          };
+          reader.readAsDataURL(f);
+        }
+      }
+    },
+
+    handleDrop(event) {
+      this.handleFiles(event.dataTransfer.files);
+    },
+
+    removeFile(idx) {
+      this.files.splice(idx, 1);
+    },
+
+    dragStart(idx) { this.dragging = idx; },
+
+    dragDrop(idx) {
+      if (this.dragging === null || this.dragging === idx) return;
+      const moved = this.files.splice(this.dragging, 1)[0];
+      this.files.splice(idx, 0, moved);
+      this.dragging = null;
+    },
+
+    orderString() {
+      return this.files.map((_, i) => i).join(',');
+    },
+
+    _startSubmittingState() {
+      this.submitting = true;
+
+      // Cronómetro visible al usuario
+      const t0 = Date.now();
+      this._elapsedTimer = setInterval(() => {
+        this.elapsed = Math.floor((Date.now() - t0) / 1000);
+      }, 1000);
+
+      // Aviso si el usuario intenta cerrar la pestaña mientras procesa
+      this._beforeUnloadHandler = (e) => {
+        e.preventDefault();
+        e.returnValue = '';     // mensaje genérico (los navegadores ignoran el texto)
+      };
+      window.addEventListener('beforeunload', this._beforeUnloadHandler);
+    },
+
+    _endSubmittingState() {
+      this.submitting = false;
+      if (this._elapsedTimer) {
+        clearInterval(this._elapsedTimer);
+        this._elapsedTimer = null;
+      }
+      if (this._beforeUnloadHandler) {
+        window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+        this._beforeUnloadHandler = null;
+      }
+    },
+
+    async submitForm() {
+      // Guard contra envíos duplicados (clic doble, doble-Enter, etc.)
+      if (this.submitting) return;
+
+      if (this.files.length === 0) {
+        alert('Debes seleccionar al menos una imagen.');
+        return;
+      }
+
+      const form = document.getElementById('insert-form');
+      const data = new FormData(form);
+
+      // Remove any previously attached files, then attach in current order
+      data.delete('images');
+      for (const f of this.files) { data.append('images', f.file); }
+
+      // Set document_type to match radio selection
+      data.set('document_type', this.docType);
+
+      // A partir de aquí: botón bloqueado + overlay visible + beforeunload activo
+      this._startSubmittingState();
+
+      // Salvavidas: si por la razón que sea (red, browser, server)
+      // la respuesta no llega en 5 minutos, abortamos el fetch para
+      // no dejar al usuario con el overlay puesto eternamente.
+      // 5 minutos es generoso: un manuscrito de 10 páginas tarda
+      // ~2-3 min en el servidor. Si pasa este timeout, casi seguro
+      // que hay un problema de red.
+      const FETCH_TIMEOUT_MS = 5 * 60 * 1000;
+      const ctrl    = new AbortController();
+      const timer   = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+
+      try {
+        const res = await fetch(form.action || window.location.href, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': '{{ csrf_token }}' },
+          body: data,
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+
+        // Antes de salir de la página, retiramos el handler de beforeunload
+        // (el cambio de URL no debe disparar una alerta tras una corrida exitosa).
+        if (this._beforeUnloadHandler) {
+          window.removeEventListener('beforeunload', this._beforeUnloadHandler);
+          this._beforeUnloadHandler = null;
+        }
+
+        if (res.redirected) {
+          // Flujo normal: insert → ocr_process → edit_document
+          window.location.href = res.url;
+        } else {
+          // El servidor devolvió la misma página con errores de validación;
+          // re-renderizamos tal cual y desbloqueamos el formulario.
+          document.open();
+          document.write(await res.text());
+          document.close();
+        }
+      } catch (err) {
+        clearTimeout(timer);
+        // Error de red, timeout, o abort: liberamos al usuario
+        this._endSubmittingState();
+        if (err.name === 'AbortError') {
+          alert('La respuesta tardó demasiado. ' +
+                'Recarga la página: si el documento se creó, lo verás ' +
+                'en la lista de documentos.');
+        } else {
+          alert('Error al subir el documento. Comprueba tu conexión y ' +
+                'vuelve a intentarlo.');
+        }
+      }
+    },
+  };
+}
+
+// ── Salvaguarda contra bfcache ──────────────────────────────────────────
+// Cuando el usuario navega hacia atrás (botón Back) a esta página después
+// de haber enviado el form, algunos navegadores restauran la versión
+// cacheada del DOM con el overlay todavía visible y `submitting=true`,
+// dejando al usuario incapaz de reintentar. El evento `pageshow` con
+// `event.persisted=true` indica restauración desde bfcache; en ese caso
+// recargamos la página fresca para asegurar que el estado de Alpine
+// vuelve a su valor inicial (submitting=false, files=[]).
+window.addEventListener('pageshow', function(event) {
+  if (event.persisted) {
+    window.location.reload();
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,733 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Editar — {{ doc.title }} — ArchivoOCR{% endblock %}
+{% block main_class %}container-fluid py-3{% endblock %}
+
+{% block content %}
+
+<!-- Region drawer styles (no hace falta tocar base.html). -->
+<link rel="stylesheet" href="{% static 'css/region_drawer.css' %}">
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h4 class="fw-bold mb-0"><i class="bi bi-pencil-square me-2 text-warning"></i>Editar documento</h4>
+    <p class="text-muted small mb-0">{{ doc.title }}</p>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{% url 'view_document' doc.id %}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-eye me-1"></i>Ver
+    </a>
+  </div>
+</div>
+
+<form method="post" action="{% url 'edit_document' doc.id %}?page={{ page_num }}" id="edit-form">
+  {% csrf_token %}
+
+  <div class="row g-3">
+
+    <!-- ── Left: Facsimile (with region drawer) + segmentation viewer ───── -->
+    <div class="col-md-5">
+
+      <!-- Facsimile + drawing canvas -->
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+          <span class="small fw-semibold">
+            <i class="bi bi-image me-1"></i>Facsimilar — p. {{ current_page.order }}
+          </span>
+          <div class="d-flex gap-1 flex-wrap">
+            <!-- Modo: ver / dibujar regiones -->
+            <div class="btn-group btn-group-sm" role="group" id="modeBtnGroup">
+              <button type="button" class="btn btn-outline-secondary active" data-mode="view"
+                      title="Vista normal (sin dibujar)">
+                <i class="bi bi-hand-index"></i>
+              </button>
+              <button type="button" class="btn btn-outline-secondary" data-mode="draw"
+                      title="Dibujar nueva región">
+                <i class="bi bi-bounding-box"></i>
+              </button>
+            </div>
+            <!-- Zoom -->
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="zoomInBtn"  title="Zoom +"><i class="bi bi-zoom-in"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="zoomOutBtn" title="Zoom −"><i class="bi bi-zoom-out"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="zoomResetBtn" title="Restablecer"><i class="bi bi-arrow-counterclockwise"></i></button>
+          </div>
+        </div>
+
+        <div class="card-body p-0 overflow-auto" style="max-height:55vh">
+          {% if current_page %}
+          <div id="facsDrawerWrap" class="region-drawer-wrap"
+               data-page-id="{{ current_page.id }}"
+               data-save-url="{% url 'save_regions' current_page.id %}"
+               data-ocr-regions-url="{% url 'ocr_regions_page' current_page.id %}"
+               data-initial-regions="{{ current_regions_json }}">
+            <img id="facsImg"
+                 src="{{ current_page.image.url }}"
+                 alt="Facsimilar página {{ current_page.order }}"
+                 class="region-drawer-img"
+                 draggable="false">
+            <canvas id="facsCanvas" class="region-drawer-canvas"></canvas>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Region list panel -->
+      {% if current_page %}
+      <div class="card border-0 shadow-sm mb-3" id="regionsPanel" style="display:none">
+        <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-2">
+          <span class="small fw-semibold">
+            <i class="bi bi-bounding-box-circles me-1"></i>Regiones definidas
+            (<span id="regionCount">0</span>)
+          </span>
+          <div class="d-flex gap-1">
+            <button type="button" class="btn btn-outline-danger btn-sm" id="clearRegionsBtn"
+                    title="Borrar todas las regiones">
+              <i class="bi bi-trash"></i>
+            </button>
+            <button type="button" class="btn btn-outline-info btn-sm" id="ocrRegionsBtn"
+                    title="OCR sólo de las regiones, en orden">
+              <i class="bi bi-cpu me-1"></i>OCR de regiones
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-2">
+          <p class="text-muted small mb-2">
+            Arrastra para reordenar. El OCR procesará cada región en este orden y separará
+            los resultados con un salto de línea doble.
+          </p>
+          <ul class="list-group list-group-flush" id="regionList"></ul>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Line segmentation visualizer -->
+      {% if current_page %}
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-2">
+          <span class="small fw-semibold">
+            <i class="bi bi-grid-3x3-gap me-1"></i>Segmentación automática de líneas
+          </span>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="regenSegBtn"
+                  title="Regenerar la visualización (la imagen original podría haber cambiado)">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <div class="card-body p-0 overflow-auto" style="max-height:55vh; text-align:center; background:#f8f9fa">
+          {# Si la página todavía no terminó su OCR, el endpoint de
+             segmentación devolvería 503. En vez de pedir la imagen y
+             que falle, mostramos un placeholder y dejamos que el
+             polling de estado (ver el JS de polling más abajo)
+             recargue la página cuando el OCR complete: entonces la
+             cache estará lista y la <img> apuntará al JPG generado. #}
+          {% if current_page.ocr_status == 'done' %}
+          <img id="segmentationImg"
+               src="{% url 'line_segmentation_image' current_page.id %}"
+               alt="Segmentación de líneas"
+               class="img-fluid p-1"
+               style="max-width:100%; cursor:zoom-in"
+               loading="lazy">
+          {% else %}
+          <div class="d-flex flex-column align-items-center justify-content-center text-muted py-5">
+            <span class="spinner-border spinner-border-sm mb-2" role="status" aria-hidden="true"></span>
+            <span class="small fst-italic">Generando segmentación…</span>
+          </div>
+          {% endif %}
+        </div>
+        <div class="card-footer bg-body-tertiary py-1 text-muted small">
+          Las cajas se generan a partir del facsimilar deskewed. Los colores
+          identifican líneas (L#) y bloques (B#) detectados por el pipeline.
+        </div>
+      </div>
+      {% endif %}
+
+    </div><!-- /left col -->
+
+    <!-- ── Right: Text editor ──────────────────────────────────────── -->
+    <div class="col-md-7">
+
+      <!-- Page text -->
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-2">
+          <span class="small fw-semibold">
+            <i class="bi bi-file-text me-1"></i>Texto transcrito — p. {{ current_page.order }}
+            {% if current_page and current_page.ocr_status != 'done' %}
+              <span class="badge ms-2
+                {% if current_page.ocr_status == 'processing' %}bg-warning text-dark
+                {% elif current_page.ocr_status == 'pending' %}bg-secondary
+                {% elif current_page.ocr_status == 'error' %}bg-danger
+                {% endif %}">
+                {% if current_page.ocr_status == 'processing' %}
+                  <span class="spinner-border spinner-border-sm me-1" style="width:.7em;height:.7em"></span>Procesando OCR
+                {% elif current_page.ocr_status == 'pending' %}
+                  <i class="bi bi-hourglass-split me-1"></i>En cola
+                {% elif current_page.ocr_status == 'error' %}
+                  <i class="bi bi-exclamation-triangle me-1"></i>Error OCR
+                {% endif %}
+              </span>
+            {% endif %}
+          </span>
+          {% if current_page.ocr_status == 'done' %}
+          <button type="button" class="btn btn-outline-info btn-sm" id="rerunOcrBtn"
+                  data-page-id="{{ current_page.id }}">
+            <i class="bi bi-cpu me-1"></i>Re-ejecutar OCR
+          </button>
+          {% endif %}
+        </div>
+        <div class="card-body p-2">
+          {% if current_page %}
+            {% if current_page.ocr_status == 'done' %}
+              <textarea name="text_page_{{ current_page.id }}"
+                        id="pageTextarea"
+                        class="form-control font-monospace{% if is_processing %} bg-body-tertiary{% endif %}"
+                        rows="22"
+                        {% if is_processing %}readonly{% endif %}
+                        placeholder="Texto transcrito para esta página…">{{ current_page.text }}</textarea>
+            {% else %}
+              {# Página aún no lista — mostramos estado en lugar del textarea #}
+              <div id="ocrWaitingPanel"
+                   class="d-flex flex-column align-items-center justify-content-center text-center px-3"
+                   style="min-height: 22em;"
+                   data-page-id="{{ current_page.id }}">
+                {% if current_page.ocr_status == 'processing' %}
+                  <div class="spinner-border text-warning mb-3" style="width:3rem;height:3rem"></div>
+                  <h5 class="mb-2">Procesando OCR de esta página</h5>
+                  <p class="text-muted mb-0">
+                    El texto aparecerá aquí cuando termine.
+                    La página se recargará automáticamente.
+                  </p>
+                {% elif current_page.ocr_status == 'pending' %}
+                  <i class="bi bi-hourglass-split display-4 text-secondary mb-3"></i>
+                  <h5 class="mb-2">Esta página está en cola</h5>
+                  <p class="text-muted mb-0">
+                    El OCR procesa las páginas en orden. Cuando termine
+                    con las anteriores empezará con ésta.
+                  </p>
+                {% elif current_page.ocr_status == 'error' %}
+                  <i class="bi bi-exclamation-triangle display-4 text-danger mb-3"></i>
+                  <h5 class="mb-2">Error al procesar el OCR</h5>
+                  <p class="text-muted small mb-3">
+                    {{ current_page.ocr_error|default:"Error desconocido." }}
+                  </p>
+                  <button type="button" class="btn btn-outline-danger btn-sm"
+                          id="retryOcrBtn" data-page-id="{{ current_page.id }}">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+                  </button>
+                {% endif %}
+              </div>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Page navigation inside form -->
+      {% if total_pages > 1 %}
+      <div class="d-flex align-items-center gap-2 mb-3">
+        {% if page_num > 1 %}
+          <button type="submit" name="_nav" value="{{ page_num|add:'-1' }}"
+                  formaction="{% url 'edit_document' doc.id %}?page={{ page_num|add:'-1' }}"
+                  class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-chevron-left"></i> Anterior
+          </button>
+        {% endif %}
+        <span class="text-muted small">
+          Página <strong>{{ page_num }}</strong> / <strong>{{ total_pages }}</strong>
+        </span>
+        {% if page_num < total_pages %}
+          <button type="submit" name="_nav" value="{{ page_num|add:'1' }}"
+                  formaction="{% url 'edit_document' doc.id %}?page={{ page_num|add:'1' }}"
+                  class="btn btn-outline-secondary btn-sm">
+            Siguiente <i class="bi bi-chevron-right"></i>
+          </button>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Metadata collapsible -->
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-body-tertiary py-2" style="cursor:pointer"
+             data-bs-toggle="collapse" data-bs-target="#metaCollapse">
+          <span class="small fw-semibold">
+            <i class="bi bi-card-text me-1"></i>Metadatos del documento
+          </span>
+          <i class="bi bi-chevron-down float-end"></i>
+        </div>
+        <div class="collapse" id="metaCollapse">
+          <div class="card-body">
+            <div class="row g-2">
+              <div class="col-md-8">
+                <label class="form-label small">Título</label>
+                {{ meta_form.title }}
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small">Año</label>
+                {{ meta_form.year }}
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small">Tipo</label>
+                {{ meta_form.document_type }}
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small">Autor</label>
+                {{ meta_form.author }}
+              </div>
+              <div class="col-12">
+                <label class="form-label small">Descripción</label>
+                {{ meta_form.description }}
+              </div>
+              <div class="col-12">
+                <div class="form-check">
+                  {{ meta_form.is_public }}
+                  <label class="form-check-label small">Documento público</label>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="form-check">
+                  {{ meta_form.use_bert_correction }}
+                  <label class="form-check-label small" for="{{ meta_form.use_bert_correction.id_for_label }}">
+                    Corrección con BERT (más precisa, más lenta)
+                  </label>
+                  <div class="form-text small text-muted">
+                    Activa el reranker neuronal BETO para escoger entre los
+                    candidatos del corrector ortográfico. Mucho mejor en
+                    casos ambiguos pero unas 100× más lento (1-5&nbsp;s/página).
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Save button -->
+      <div class="d-flex justify-content-end align-items-center gap-3">
+        {% if is_processing %}
+          <span class="text-warning small">
+            <i class="bi bi-lock-fill me-1"></i>
+            Guardado bloqueado mientras el OCR está en proceso.
+          </span>
+        {% endif %}
+        <button type="submit" class="btn btn-success px-5"
+                {% if is_processing %}disabled
+                  title="No se puede guardar mientras hay páginas en proceso de OCR."
+                {% endif %}>
+          <i class="bi bi-floppy me-2"></i>Guardar cambios
+        </button>
+      </div>
+
+    </div><!-- /right col -->
+  </div><!-- /row -->
+
+  <!-- Thumbnail strip -->
+  {% if pages|length > 1 %}
+  <div class="d-flex gap-2 mt-3 overflow-auto pb-2" id="thumbsStrip">
+    {% for p in pages %}
+      {% if p.ocr_status == 'done' %}
+        <a href="{% url 'edit_document' doc.id %}?page={{ p.order }}"
+           class="flex-shrink-0 position-relative thumb-link"
+           data-page-id="{{ p.id }}" data-page-order="{{ p.order }}"
+           data-ocr-status="done"
+           title="Página {{ p.order }} — lista">
+          <img src="{{ p.image.url }}" alt="p.{{ p.order }}"
+               style="height:60px; width:auto; border-radius:4px; display:block;
+                      border: 2px solid {% if p.order == page_num %}#198754{% else %}#dee2e6{% endif %}">
+        </a>
+      {% else %}
+        <span class="flex-shrink-0 position-relative thumb-link"
+              data-page-id="{{ p.id }}" data-page-order="{{ p.order }}"
+              data-ocr-status="{{ p.ocr_status }}"
+              title="Página {{ p.order }} — {{ p.get_ocr_status_display }}"
+              style="cursor: not-allowed;">
+          <img src="{{ p.image.url }}" alt="p.{{ p.order }}"
+               style="height:60px; width:auto; border-radius:4px; display:block;
+                      opacity:{% if p.ocr_status == 'processing' %}0.7{% else %}0.45{% endif %};
+                      border: 2px solid
+                        {% if p.order == page_num %}#198754
+                        {% elif p.ocr_status == 'error' %}#dc3545
+                        {% elif p.ocr_status == 'processing' %}#ffc107
+                        {% else %}#adb5bd{% endif %};">
+          <span class="position-absolute top-50 start-50 translate-middle
+                       d-flex align-items-center justify-content-center
+                       text-white" style="text-shadow: 0 0 4px rgba(0,0,0,.7);">
+            {% if p.ocr_status == 'processing' %}
+              <span class="spinner-border spinner-border-sm"></span>
+            {% elif p.ocr_status == 'pending' %}
+              <i class="bi bi-hourglass-split"></i>
+            {% elif p.ocr_status == 'error' %}
+              <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+            {% endif %}
+          </span>
+        </span>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {# Si hay páginas pendientes, marcamos el contenedor para que el JS
+     active el polling. data-poll-url indica el endpoint a sondear. #}
+  <div id="ocrStatusPoller"
+       data-poll-url="{% url 'document_ocr_status' doc.id %}"
+       data-current-page-id="{{ current_page.id|default:'' }}"
+       data-current-page-status="{{ current_page.ocr_status|default:'done' }}"
+       style="display:none"></div>
+  {% endif %}
+
+</form>
+
+{# ── Modal de aviso al salir mientras hay procesamiento en curso ─────── #}
+{% if is_processing %}
+<div class="modal fade" id="abandonModal" tabindex="-1" aria-labelledby="abandonModalLabel" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-warning">
+        <h5 class="modal-title text-warning" id="abandonModalLabel">
+          <i class="bi bi-exclamation-triangle-fill me-2"></i>OCR en proceso
+        </h5>
+      </div>
+      <div class="modal-body">
+        {% if is_first_time %}
+          {# Primera vez: doc recién subido, sin save previo. Abandonar = borrar. #}
+          <p class="mb-2">
+            El OCR de este documento aún no ha terminado. Tu trabajo
+            no se ha guardado y <strong>todavía no se puede guardar</strong>.
+          </p>
+          <p class="mb-2">
+            Como es la primera vez que entras a este documento y no
+            existe una versión guardada anterior, si sales ahora
+            <strong>el documento se eliminará por completo</strong>
+            — incluidos los facsímiles subidos y las páginas ya transcritas.
+          </p>
+          <p class="text-muted small mb-0">
+            Para conservarlo, vuelve y espera a que termine el OCR.
+          </p>
+        {% else %}
+          {# Doc con histórico de save: NO se borra, solo sale. #}
+          <p class="mb-2">
+            El OCR está procesando alguna página de este documento.
+            Tus cambios recientes <strong>no están guardados</strong>.
+          </p>
+          <p class="mb-2">
+            Si sales ahora, el documento se conserva con
+            <strong>la última versión guardada</strong>. El OCR seguirá
+            corriendo en segundo plano y, al volver, encontrarás las
+            páginas que se hayan procesado actualizadas.
+          </p>
+          <p class="text-muted small mb-0">
+            Tus ediciones no guardadas en esta sesión se perderán.
+          </p>
+        {% endif %}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          <i class="bi bi-arrow-left me-1"></i>Quedarme aquí
+        </button>
+        {% if is_first_time %}
+          <button type="button" class="btn btn-danger" id="confirmAbandonBtn">
+            <i class="bi bi-trash me-1"></i>Salir y eliminar
+          </button>
+        {% else %}
+          <button type="button" class="btn btn-warning" id="confirmAbandonBtn">
+            <i class="bi bi-box-arrow-right me-1"></i>Salir sin guardar
+          </button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<!-- CSRF token reachable from JS -->
+<script>window.CSRF_TOKEN = '{{ csrf_token }}';</script>
+
+<!-- Region drawer -->
+<script src="{% static 'js/region_drawer.js' %}"></script>
+
+<!-- Re-run OCR (full page) and segmentation regen -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // ── Re-run OCR on current page (full image) ────────────────────────────
+  const rerunBtn = document.getElementById('rerunOcrBtn');
+  const textarea = document.getElementById('pageTextarea');
+  if (rerunBtn) {
+    rerunBtn.addEventListener('click', async () => {
+      const pageId = rerunBtn.dataset.pageId;
+      rerunBtn.disabled = true;
+      const originalHTML = rerunBtn.innerHTML;
+      rerunBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Procesando…';
+      try {
+        const res = await fetch(`/ocr/page/${pageId}/rerun/`, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': window.CSRF_TOKEN },
+        });
+        const data = await res.json();
+        if (data.text !== undefined) {
+          textarea.value = data.text;
+          textarea.classList.add('border-success');
+          setTimeout(() => textarea.classList.remove('border-success'), 2000);
+        } else {
+          alert('Error al ejecutar OCR: ' + (data.error || 'desconocido'));
+        }
+      } catch (e) {
+        alert('Error de conexión.');
+      } finally {
+        rerunBtn.disabled = false;
+        rerunBtn.innerHTML = originalHTML;
+      }
+    });
+  }
+
+  // ── Regenerate segmentation cache ──────────────────────────────────────
+  const regenBtn = document.getElementById('regenSegBtn');
+  const segImg   = document.getElementById('segmentationImg');
+  if (regenBtn && segImg) {
+    regenBtn.addEventListener('click', () => {
+      const baseSrc = segImg.src.split('?')[0];
+      regenBtn.disabled = true;
+      const originalHTML = regenBtn.innerHTML;
+      regenBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+      // ?force=1 triggers regeneration server-side, &t= breaks browser cache
+      segImg.src = baseSrc + '?force=1&t=' + Date.now();
+      const restore = () => {
+        regenBtn.disabled = false;
+        regenBtn.innerHTML = originalHTML;
+      };
+      segImg.onload = restore;
+      segImg.onerror = restore;
+    });
+  }
+
+  // ── Retry OCR on a single page (botón en estado error) ─────────────────
+  const retryBtn = document.getElementById('retryOcrBtn');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', async () => {
+      const pageId = retryBtn.dataset.pageId;
+      retryBtn.disabled = true;
+      try {
+        const res = await fetch(`/ocr/page/${pageId}/rerun/`, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': window.CSRF_TOKEN },
+        });
+        // El POST tarda lo que tarde el OCR; al volver, recargamos
+        // para que la página muestre el nuevo estado (done o error otra vez).
+        window.location.reload();
+      } catch (e) {
+        alert('Error de conexión.');
+        retryBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Polling del estado OCR (flujo progresivo) ──────────────────────────
+  // Si hay algún #ocrStatusPoller en la página, hay páginas no-listas
+  // que el thread está procesando. Sondeamos el endpoint cada 3 s y:
+  //   - Actualizamos thumbnails con el nuevo estado (cambia borde + icono).
+  //   - Si la página ACTUAL cambia de estado (pasa a done o error), recargamos.
+  //   - Si TODAS están done, paramos el polling.
+  const poller = document.getElementById('ocrStatusPoller');
+  if (poller) {
+    const pollUrl       = poller.dataset.pollUrl;
+    const currentPageId = poller.dataset.currentPageId;
+    const initialStatus = poller.dataset.currentPageStatus;
+    const POLL_MS = 3000;
+
+    let pollHandle = null;
+
+    function paintThumb(thumbEl, status) {
+      const img = thumbEl.querySelector('img');
+      if (!img) return;
+      // Limpiamos overlays previos
+      const old = thumbEl.querySelector('.thumb-overlay');
+      if (old) old.remove();
+
+      const isCurrent = thumbEl.dataset.pageOrder ===
+                        new URLSearchParams(location.search).get('page');
+      let borderColor;
+      switch (status) {
+        case 'done':       borderColor = isCurrent ? '#198754' : '#dee2e6'; break;
+        case 'processing': borderColor = '#ffc107'; break;
+        case 'error':      borderColor = '#dc3545'; break;
+        default:           borderColor = '#adb5bd';  // pending
+      }
+      img.style.borderColor = borderColor;
+      img.style.opacity = status === 'done' ? '1'
+                        : status === 'processing' ? '0.7' : '0.45';
+
+      // Si pasó a done, el span pasa a ser un link clickeable
+      if (status === 'done' && thumbEl.tagName === 'SPAN') {
+        // Convertimos el span en <a> reemplazando el outerHTML
+        const docId = pollUrl.match(/\/documents\/(\d+)\//)[1];
+        const order = thumbEl.dataset.pageOrder;
+        const a = document.createElement('a');
+        a.href = `/documents/${docId}/edit/?page=${order}`;
+        a.className = thumbEl.className;
+        a.dataset.pageId = thumbEl.dataset.pageId;
+        a.dataset.pageOrder = order;
+        a.dataset.ocrStatus = 'done';
+        a.title = `Página ${order} — lista`;
+        a.appendChild(img);
+        thumbEl.replaceWith(a);
+        return;
+      }
+
+      // Overlay de icono de estado
+      if (status !== 'done') {
+        const overlay = document.createElement('span');
+        overlay.className = 'thumb-overlay position-absolute top-50 start-50 translate-middle text-white';
+        overlay.style.textShadow = '0 0 4px rgba(0,0,0,.7)';
+        if (status === 'processing') {
+          overlay.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        } else if (status === 'error') {
+          overlay.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-danger"></i>';
+        } else {
+          overlay.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+        }
+        thumbEl.appendChild(overlay);
+      }
+
+      thumbEl.dataset.ocrStatus = status;
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch(pollUrl, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Actualizamos thumbnails
+        document.querySelectorAll('.thumb-link').forEach(thumb => {
+          const pid = thumb.dataset.pageId;
+          const page = data.pages.find(p => String(p.id) === pid);
+          if (!page) return;
+          if (page.ocr_status !== thumb.dataset.ocrStatus) {
+            paintThumb(thumb, page.ocr_status);
+          }
+        });
+
+        // ¿Cambió el estado de la página actual? Recargar.
+        if (currentPageId) {
+          const cur = data.pages.find(p => String(p.id) === currentPageId);
+          if (cur && cur.ocr_status !== initialStatus) {
+            clearInterval(pollHandle);
+            window.location.reload();
+            return;
+          }
+        }
+
+        // Todo listo → paramos el polling
+        if (data.all_done) {
+          clearInterval(pollHandle);
+        }
+      } catch (e) {
+        // Silencioso: si falla un poll volvemos a intentar en 3s
+      }
+    }
+
+    pollHandle = setInterval(poll, POLL_MS);
+    // Primer poll inmediato para feedback rápido si algo ya cambió
+    poll();
+  }
+});
+</script>
+
+{% if is_processing %}
+{# ── Guardia de navegación: documento en proceso = no guardable ─────── #}
+<script>
+(function() {
+  'use strict';
+  const ABANDON_URL = '{% url "abandon_document" doc.id %}';
+  const csrfToken   = window.CSRF_TOKEN;
+  const modalEl     = document.getElementById('abandonModal');
+  const confirmBtn  = document.getElementById('confirmAbandonBtn');
+  if (!modalEl || !confirmBtn) return;
+  const modal = new bootstrap.Modal(modalEl);
+
+  // Cuando el usuario confirma "salir y eliminar" guardamos a dónde
+  // quería ir originalmente para redirigir tras borrar.
+  let pendingHref = null;
+  // Para sendBeacon al cerrar la pestaña/ventana, solo si NO hemos
+  // confirmado ya por el modal (porque si confirmó, ya hicimos fetch).
+  let intentionalLeave = false;
+
+  function showModal(href) {
+    pendingHref = href;
+    modal.show();
+  }
+
+  // ── Interceptamos cualquier click en <a> que salga de esta página ──
+  document.addEventListener('click', function(e) {
+    const link = e.target.closest('a[href]');
+    if (!link) return;
+    // Permitir enlaces internos al doc (anchors, paginación, ...) y
+    // los marcados explícitamente como "no-warn".
+    const href = link.getAttribute('href') || '';
+    if (href.startsWith('#')) return;
+    if (link.hasAttribute('data-no-warn')) return;
+    // target=_blank: el usuario abre en nueva pestaña, no abandona
+    if (link.target === '_blank') return;
+    // Si el destino es la misma página de edición (otra página), permitir
+    if (href.includes('/documents/{{ doc.id }}/edit/')) return;
+
+    e.preventDefault();
+    showModal(link.href);
+  }, true);
+
+  // ── Interceptamos submits de forms ajenos al de edición ────────────
+  document.addEventListener('submit', function(e) {
+    const form = e.target;
+    // El form principal de edit tiene method=post a /edit/. Es el único
+    // que NO interceptamos — el server ya bloquea el save si processing.
+    if (form.action && form.action.includes('/documents/{{ doc.id }}/edit/')) {
+      return;
+    }
+    e.preventDefault();
+    showModal(form.action || window.location.href);
+  }, true);
+
+  // ── Click en el botón de confirmación del modal ────────────────────
+  // Su etiqueta y color varía según `is_first_time` (la decide el server
+  // en función de Document.total_edits). El JS solo lanza el POST y
+  // navega — toda la decisión de borrar/no-borrar la toma el servidor.
+  const originalBtnHTML = confirmBtn.innerHTML;
+  confirmBtn.addEventListener('click', async function() {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saliendo…';
+    intentionalLeave = true;
+    try {
+      const fd = new FormData();
+      fd.append('csrfmiddlewaretoken', csrfToken);
+      const res = await fetch(ABANDON_URL, {
+        method: 'POST', body: fd, credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert('No se pudo salir: ' + (data.error || res.statusText));
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = originalBtnHTML;
+        intentionalLeave = false;
+        return;
+      }
+    } catch (err) {
+      console.warn('Abandon fetch failed:', err);
+    }
+    // Navegamos al destino que el usuario quería
+    window.location.href = pendingHref || "{% url 'home' %}";
+  });
+
+  // NOTA IMPORTANTE: NO usamos `beforeunload` para enviar sendBeacon de
+  // abandono. La razón es que `beforeunload` se dispara para CUALQUIER
+  // navegación saliente — incluidas las legítimas como:
+  //   - window.location.reload() que dispara el polling cuando una
+  //     página cambia de estado pending→processing
+  //   - Click en thumbnail / siguiente página dentro del mismo doc
+  //   - Submit del propio form de edit
+  //   - F5 o atrás del navegador
+  // Si pusiéramos un sendBeacon ahí, el documento se borraría solo en
+  // todos esos casos, no solo al "salir de verdad". Mejor que cerrar
+  // pestaña deje el doc en proceso (el thread sigue, lo encuentras
+  // completo al volver) que arriesgar borrados accidentales.
+})();
+</script>
+{% endif %}
+{% endblock %}
