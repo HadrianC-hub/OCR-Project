@@ -8,9 +8,10 @@ from preprocessing.config import (
 )
 
 
-# 1. NORMALIZACIÓN
+# 1. NORMALIZACION
 
 def trim_vertical(binary: np.ndarray, margin: int = 2) -> np.ndarray:
+    # Recorta filas sin tinta arriba y abajo, con margen proporcional al alto del texto.
     row_min   = binary.min(axis=1)
     text_rows = np.where(row_min < 128)[0]
     if len(text_rows) == 0:
@@ -24,6 +25,7 @@ def trim_vertical(binary: np.ndarray, margin: int = 2) -> np.ndarray:
 
 
 def resize_to_height(img: np.ndarray, target_height: int = 64, min_width: int = 16) -> np.ndarray:
+    # Redimensiona a altura fija conservando aspect ratio (interpolacion AREA).
     h, w = img.shape[:2]
     if h == 0 or w == 0:
         return np.full((target_height, min_width), 255, dtype=img.dtype)
@@ -33,7 +35,7 @@ def resize_to_height(img: np.ndarray, target_height: int = 64, min_width: int = 
 
 
 def to_float(img: np.ndarray, invert: bool = False) -> np.ndarray:
-    """uint8 [0,255] → float32 [0,1]. Convención: 0=tinta, 1=fondo."""
+    # uint8 [0,255] -> float32 [0,1]. Convencion: 0=tinta, 1=fondo.
     f = img.astype(np.float32) / 255.0
     return 1.0 - f if invert else f
 
@@ -44,7 +46,7 @@ def normalize_line(
     trim_margin:   int = 2,
     min_width:     int = MIN_WIDTH,
 ) -> np.ndarray:
-    """trim vertical → resize a altura fija → float32 [0,1]."""
+    # Pipeline corto: trim vertical -> resize a altura fija -> float32 [0,1].
     return to_float(resize_to_height(
         trim_vertical(binary, margin=trim_margin),
         target_height=target_height,
@@ -52,7 +54,7 @@ def normalize_line(
     ))
 
 
-# 2. DETECCIÓN DE LÍNEAS
+# 2. DETECCION DE LINEAS
 
 def _split_oversized_boxes(
     boxes:           list[tuple[int, int]],
@@ -60,26 +62,13 @@ def _split_oversized_boxes(
     median_h:        float,
     min_line_height: int,
 ) -> list[tuple[int, int]]:
-    """
-    Parte cajas grandes en sub-cajas buscando mínimos de proyección.
-
-    Una caja se considera "oversized" cuando supera 1.6 × la altura mediana
-    de línea Y al menos `min_line_height * 2` (suficiente para alojar dos
-    líneas reales). El partido se hace en el mínimo de proyección dentro
-    del 50% central de la caja, lo que sitúa el corte en el hueco más
-    profundo entre cuerpos de letra.
-
-    El bucle es iterativo: después de un partido se vuelven a evaluar las
-    sub-cajas resultantes y se parten también si siguen siendo oversized.
-    Esto es necesario en textos con cuerpo grande (≈ 70 px), donde los
-    descenders de una línea tocan los ascenders de la siguiente y la
-    proyección entre ellas no llega a caer por debajo del umbral Otsu;
-    Otsu agrupa entonces 3-5 líneas en un mismo bbox y un único corte
-    no basta para separarlas todas.
-
-    Para limitar coste en imágenes patológicas, el bucle se detiene tras
-    `max_iter` pasadas sin cambios o cuando ningún bbox supera el umbral.
-    """
+    # Parte cajas grandes en sub-cajas buscando minimos de proyeccion.
+    #
+    # Una caja es "oversized" cuando excede 1.6x la altura mediana y al menos
+    # min_line_height*2. El corte se hace en el minimo de proyeccion del 50%
+    # central. El bucle es iterativo porque en textos con cuerpo grande (~70 px)
+    # los descenders de una linea tocan los ascenders de la siguiente y Otsu
+    # agrupa varias lineas en un solo bbox; un solo corte no separa todas.
     if len(boxes) < 1 or median_h <= 0:
         return boxes
     threshold_h = median_h * 1.6
@@ -114,10 +103,8 @@ def detect_lines(
     binary: np.ndarray,
     cfg:    PipelineConfig,
 ) -> list[tuple[int, int]]:
-    """
-    Detecta líneas por proyección horizontal con pre-dilatación morfológica.
-    Devuelve lista de (y_top, y_bot) ordenada de arriba a abajo, sin solapamientos.
-    """
+    # Detecta lineas por proyeccion horizontal con pre-dilatacion morfologica.
+    # Devuelve [(y_top, y_bot), ...] ordenadas y sin solapamientos.
     H_img, W_img = binary.shape
 
     if cfg.use_clahe or cfg.invert_binary:
@@ -128,16 +115,13 @@ def detect_lines(
 
     text_mask = (binary_for_seg < 128).astype(np.uint8)
 
-    # Dilatación horizontal: une palabras de la misma línea para que la
-    # proyección sea continua a lo largo de cada renglón.
-    # Dilatación vertical: pequeña, solo para conectar el acento de una
-    # mayúscula (Á, É) con el cuerpo de la letra en la proyección. El hueco
-    # acento↔cuerpo es de 2-4 píxeles para texto a esta resolución, así que
-    # `v_dil` se mantiene en 3 (mínimo suficiente). Valores más altos —que
-    # antes escalaban hasta 15— fundían líneas adyacentes y, sobre todo,
-    # absorbían en la proyección los párrafos finales cortos (p. ej. "necía.",
-    # "solente boca."), provocando que detect_lines los perdiera y que
-    # expand_to_ink los pegara al renglón vecino.
+    # Dilatacion horizontal: une palabras de la misma linea para que la
+    # proyeccion sea continua.
+    # Dilatacion vertical: pequena, solo para conectar el acento de una
+    # mayuscula (A, E acentuadas) con el cuerpo de la letra. El hueco
+    # acento-cuerpo es de 2-4 px; v_dil=3 es el minimo suficiente. Valores
+    # mas altos fundian lineas adyacentes y absorbian parrafos finales cortos
+    # (p. ej. "necia.", "solente boca."), perdiendolos en detect_lines.
     h_dil = cfg.line_h_dilation if cfg.line_h_dilation > 0 else max(5, min(150, W_img // 18))
     v_dil = cfg.line_v_dilation if cfg.line_v_dilation > 0 else 3
     if h_dil > 1 or v_dil > 1:
@@ -146,11 +130,9 @@ def detect_lines(
     else:
         text_mask_proj = text_mask.astype(np.float32)
 
-    # Proyección horizontal.
-    # El margen base (~3% del ancho) excluye texto de borde accidental.
-    # Los artefactos de encuadernación se enmascaran ANTES de llegar aquí
-    # (ver mask_binding_strips en pipeline.run), por lo que ya no es necesario
-    # ampliar este margen dinámicamente.
+    # Proyeccion horizontal. Margen base ~3% del ancho excluye texto de borde
+    # accidental. Los artefactos de encuadernacion se enmascaran ANTES en
+    # mask_binding_strips, asi que no es necesario ampliar este margen.
     base_margin = max(15, W_img // 35)
     projection  = text_mask_proj[:, base_margin: W_img - base_margin].sum(axis=1)
 
@@ -160,7 +142,8 @@ def detect_lines(
         wl = max(3, min(wl, len(projection) - (0 if len(projection) % 2 == 1 else 1)))
         if wl >= 5:
             projection = np.clip(
-                savgol_filter(projection.astype(np.float64), wl, cfg.savgol_polyorder), 0, None
+                savgol_filter(projection.astype(np.float64), wl, cfg.savgol_polyorder),
+                0, None,
             )
     elif smooth > 1:
         projection = uniform_filter(projection.astype(np.float64), size=smooth)
@@ -169,10 +152,10 @@ def detect_lines(
     if len(proj_nonzero) == 0:
         return []
 
-    # Umbral Otsu adaptado a la proyección 1-D. El tope se baja al 25% del pico
-    # (antes 40%) para que líneas cortas de fin de párrafo —cuya proyección es
-    # 3-5× menor que la de líneas completas— queden por encima del umbral. Por
-    # debajo de 0.25 los descenders empiezan a colarse como falsos positivos.
+    # Umbral Otsu adaptado a la proyeccion 1-D. Tope al 25% del pico (antes 40%)
+    # para que lineas cortas de fin de parrafo (proyeccion 3-5x menor que las
+    # completas) queden por encima del umbral. Por debajo de 0.25 los descenders
+    # empiezan a colarse como falsos positivos.
     p_max       = float(proj_nonzero.max())
     proj_u8     = np.clip(projection / p_max * 255, 0, 255).astype(np.uint8)
     otsu_val, _ = cv2.threshold(proj_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -194,7 +177,7 @@ def detect_lines(
     if in_line:
         boxes.append((y_start, len(active)))
 
-    # Fusión de segmentos próximos
+    # Fusion de segmentos proximos
     merge_gap = cfg.line_merge_gap
     if merge_gap > 0 and len(boxes) > 1:
         merged = [boxes[0]]
@@ -206,20 +189,15 @@ def detect_lines(
                 merged.append((t, b))
         boxes = merged
 
-    # Pase secundario: rescate de líneas cortas perdidas en huecos amplios.
-    # Si entre dos boxes consecutivos queda un hueco mayor que la altura mediana
-    # de línea (≈ una línea completa entera), dentro de él puede haber un
-    # párrafo terminado en una línea muy corta (p. ej. "necía.") cuya
-    # proyección no superó el umbral global. Buscamos picos locales dentro del
-    # hueco con find_peaks usando una prominencia menor; si encontramos uno
-    # con proyección razonable (al menos 5 % del pico global) lo añadimos
-    # como bbox propio.
-    #
-    # Antes del rescate descartamos slivers (h < 5 px): son fragmentos que
-    # Otsu deja sobre líneas cortas reales (sólo 2-3 filas superan el umbral
-    # de 0.25 × p_max porque el resto de la línea queda justo por debajo). Si
-    # se mantuviesen, rompen el hueco que separa la línea anterior de la
-    # siguiente y el rescate no se dispara, perdiéndose la línea corta.
+    # Rescate de lineas cortas perdidas en huecos amplios.
+    # Si entre dos boxes consecutivos hay un hueco mayor que la altura mediana,
+    # puede contener un parrafo terminado en linea muy corta (p. ej. "necia.")
+    # cuya proyeccion no supero el umbral global. Buscamos picos locales en el
+    # hueco con find_peaks y prominencia menor. Antes del rescate descartamos
+    # slivers (h < 5 px): fragmentos que Otsu deja sobre lineas cortas reales
+    # (solo 2-3 filas pasan el umbral 0.25*p_max). Si se mantuviesen, romperian
+    # el hueco entre la linea anterior y la siguiente, y el rescate no se
+    # dispararia, perdiendose la linea corta.
     if len(boxes) >= 2:
         boxes = [(t, b) for (t, b) in boxes if (b - t) >= 5]
     if len(boxes) >= 2:
@@ -246,9 +224,8 @@ def detect_lines(
                 peak_val = float(gap_proj[lp])
                 if peak_val < p_max * 0.05:
                     continue
-                # Recortar el bbox alrededor del pico hasta que la proyección
-                # caiga por debajo del 35% del valor del pico (banda principal
-                # de la línea). Limitar al rango del hueco.
+                # Recortar el bbox al rango donde la proyeccion supera el 35%
+                # del valor del pico (banda principal de la linea).
                 peak_thr = peak_val * 0.35
                 pl = lp
                 while pl > 0 and gap_proj[pl - 1] >= peak_thr:
@@ -263,17 +240,15 @@ def detect_lines(
         if rescued:
             boxes = sorted(boxes + rescued)
 
-    # Filtro de bbox candidatas:
-    #   1. Altura mínima (min_line_height).
-    #   2. Ancho mínimo de tinta (min_line_width columnas con al menos un píxel).
-    #   3. Densidad razonable: el texto normal tiene densidad media de tinta
-    #      entre 0.05 y 0.25; bloques sólidos (>0.45) son barras de borde de
-    #      escáner u otros artefactos horizontales, NO texto. Igual criterio
-    #      sobre la fila de mayor densidad: si una fila supera 0.60 de tinta,
-    #      es una barra, no la x-height de un renglón.
+    # Filtro de bboxes candidatas:
+    #   1. Altura minima (min_line_height).
+    #   2. Ancho minimo de tinta (min_line_width columnas con al menos un pixel).
+    #   3. Densidad razonable: el texto normal tiene densidad media 0.05-0.25;
+    #      bloques solidos (>0.45) son barras de borde de escaner, NO texto.
+    #      Mismo criterio sobre la fila de mayor densidad: si una fila supera
+    #      0.60 de tinta es una barra, no la x-height de un renglon.
     #      Margen lateral excluido para no contaminar la medida con artefactos
-    #      cercanos a los bordes (aunque mask_binding_strips ya los enmascaró,
-    #      pueden quedar restos finos).
+    #      cercanos a los bordes.
     valid: list[tuple[int, int]] = []
     side = max(8, W_img // 50)
     for (t, b) in boxes:
@@ -288,15 +263,17 @@ def detect_lines(
         mean_density = float(ink_mask.mean())
         max_row_dens = float(ink_mask.mean(axis=1).max())
         if mean_density > 0.45 or max_row_dens > 0.60:
-            # bbox dominado por una barra horizontal → artefacto, no texto
+            # bbox dominado por una barra horizontal -> artefacto
             continue
         valid.append((t, b))
 
     if len(valid) >= 2:
         heights = [b - t for t, b in valid]
-        valid   = _split_oversized_boxes(valid, projection, float(np.median(heights)), cfg.min_line_height)
+        valid   = _split_oversized_boxes(
+            valid, projection, float(np.median(heights)), cfg.min_line_height,
+        )
 
-    # Corrección de solapamientos: separa en el mínimo de proyección de la zona solapada
+    # Correccion de solapamientos: separa en el minimo de proyeccion de la zona solapada
     no_overlap_boxes: list[tuple[int, int]] = []
     for i, (yt, yb) in enumerate(valid):
         if i == 0:
@@ -318,11 +295,10 @@ def detect_lines(
             else:
                 no_overlap_boxes.append((yt, yb))
 
-    # Padding superior conservador para capturar acentos de mayúsculas (Á, É…).
-    # CRÍTICO: el padding nunca consume más de la mitad del gap con la línea
-    # anterior. Sin este límite, top_pad invadiría descenders de la línea
-    # superior (caso típico: 'p', 'g', 'q' en la línea anterior se cuelan
-    # dentro del bbox de la línea actual).
+    # Padding superior conservador para capturar acentos de mayusculas.
+    # CRITICO: el padding nunca consume mas de la mitad del gap con la linea
+    # anterior. Sin esto, top_pad invadiria descenders de la linea superior
+    # ('p', 'g', 'q') colandose dentro del bbox de la linea actual.
     if no_overlap_boxes:
         median_line_h = float(np.median([b - t for t, b in no_overlap_boxes]))
     else:
@@ -332,14 +308,14 @@ def detect_lines(
     for (t, b) in no_overlap_boxes:
         prev_bot      = padded[-1][1] if padded else 0
         available_gap = max(0, t - prev_bot)
-        # Nunca consumir más del 50% del gap. Si gap=0 (caso bordes), pad=0.
+        # Nunca consumir mas del 50% del gap. Si gap=0 (caso bordes), pad=0.
         pad = min(max_top_pad, available_gap // 2)
         padded.append((t - pad, b))
 
     return padded
 
 
-# 3. EXPANSIÓN Y ENDEREZADO DE LÍNEAS
+# 3. EXPANSION Y ENDEREZADO DE LINEAS
 
 def expand_all_boxes(
     binary:          np.ndarray,
@@ -349,14 +325,10 @@ def expand_all_boxes(
     min_ink_frac:    float = 0.003,
     block_boxes:     list[tuple[int, int, int, int]] | None = None,
 ) -> list[tuple[int, int, int, int]]:
-    """
-    Expande cada caja fila a fila hasta encontrar la primera fila sin tinta
-    o colisionar con la línea adyacente de la misma columna.
-
-    `no_ink_gap` tolera N filas vacías consecutivas para saltar el hueco
-    entre el cuerpo de una letra y sus diacríticos.
-    Si se proporciona `block_boxes`, la expansión respeta los límites Y de bloque.
-    """
+    # Expande cada caja fila a fila hasta encontrar la primera fila sin tinta
+    # o colisionar con la linea adyacente de la misma columna.
+    # no_ink_gap tolera N filas vacias para saltar entre cuerpo y diacriticos.
+    # Si se pasa block_boxes, la expansion respeta los limites Y de bloque.
     from collections import defaultdict
 
     H_bin  = binary.shape[0]
@@ -384,6 +356,7 @@ def expand_all_boxes(
         block_yt, block_yb = block_limits.get((xl, xr), (0, H_bin))
 
         def longest_run_bool(arr: np.ndarray) -> int:
+            # Mayor racha consecutiva de True en un vector booleano.
             if arr.size == 0:
                 return 0
             max_run = cur = 0
@@ -397,6 +370,7 @@ def expand_all_boxes(
             return max_run
 
         def row_has_ink(y: int) -> bool:
+            # True si la fila y tiene tinta densa y al menos una racha minima.
             if not (0 <= y < H_bin):
                 return False
             row = (binary[y, xl:xr] < 128)
@@ -410,27 +384,23 @@ def expand_all_boxes(
             limit_top = (local[li - 1][1] + yt) // 2 if li > 0     else block_yt
             limit_bot = (yb + local[li + 1][0]) // 2 if li < n - 1 else block_yb
 
-            # Cap vertical de la expansión: nunca crecer más de `max_expand_frac`
-            # de la altura del bbox por arriba o por abajo. Sin este límite, la
-            # primera/última línea de un bloque puede crecer hasta capturar
-            # cualquier mancha de tinta arbitrariamente lejos —típicamente la
-            # banda horizontal del borde del escáner o contaminación del
-            # encabezado de página— porque `limit_top`/`limit_bot` solo se
-            # apoyan en los límites del bloque y en el punto medio con la línea
-            # vecina, que para bloques de una sola línea o líneas extremas no
-            # acotan nada.
+            # Cap vertical: la expansion nunca crece mas de max_expand_frac
+            # del bbox por arriba o por abajo. Sin esto, la primera/ultima
+            # linea de un bloque podria capturar manchas arbitrarias (bandas
+            # de borde de escaner o cabecera de pagina) porque limit_top y
+            # limit_bot solo se apoyan en los limites del bloque.
             box_h        = max(1, yb - yt)
             max_grow_px  = max(4, int(box_h * max_expand_frac))
             limit_top    = max(limit_top, yt - max_grow_px)
             limit_bot    = min(limit_bot, yb + max_grow_px)
 
-            # Expansión hacia arriba: busca la fila con tinta más alta en [limit_top, yt)
+            # Expansion hacia arriba: busca la fila con tinta mas alta
             new_top = yt
             for y in range(yt - 1, limit_top - 1, -1):
                 if row_has_ink(y):
                     new_top = y
 
-            # Expansión hacia abajo con tolerancia de gap
+            # Expansion hacia abajo con tolerancia de gap
             new_bot      = yb
             gap_count    = 0
             last_ink_row = yb - 1
@@ -446,7 +416,7 @@ def expand_all_boxes(
 
             result[orig_idx] = (new_top, new_bot, xl, xr)
 
-    # Resolución de solapamientos post-expansión
+    # Resolucion de solapamientos post-expansion
     for (xl, xr), indices in col_groups.items():
         indices.sort(key=lambda i: result[i][0])
         for li in range(len(indices) - 1):
@@ -479,13 +449,10 @@ def straighten_line(
     min_ink_frac:   float = 0.030,
     max_shift_frac: float = 0.20,
 ) -> np.ndarray:
-    """
-    Corrige curvatura de una franja de línea por ajuste polinomial del centroide Y
-    de la tinta en rebanadas verticales.
-
-    Devuelve la franja original si el ajuste no supera los controles de calidad
-    (R² < 0.72, shift excesivo o pocos puntos válidos).
-    """
+    # Corrige curvatura de una linea por ajuste polinomial del centroide Y
+    # de la tinta en rebanadas verticales. Devuelve el strip original si el
+    # ajuste no supera los controles de calidad (R^2 < 0.72, shift excesivo
+    # o pocos puntos validos).
     H, W = binary.shape
     if H < 4 or W < 20:
         return binary
@@ -516,9 +483,9 @@ def straighten_line(
 
     if len(ys_arr) >= 4:
         q1, q3 = np.percentile(ys_arr, [25, 75])
-        fence   = max((q3 - q1) * 1.5, 4.0)
-        med     = float(np.median(ys_arr))
-        mask    = np.abs(ys_arr - med) <= fence
+        fence  = max((q3 - q1) * 1.5, 4.0)
+        med    = float(np.median(ys_arr))
+        mask   = np.abs(ys_arr - med) <= fence
         if mask.sum() >= poly_degree + 2:
             xs_arr, ys_arr = xs_arr[mask], ys_arr[mask]
         else:
@@ -554,8 +521,9 @@ def straighten_line(
 
     pad_top = max(0, int(np.ceil(-float(shifts.min()))))
     pad_bot = max(0, int(np.ceil( float(shifts.max()))))
-    src     = np.pad(binary, ((pad_top, pad_bot), (0, 0)),
-                     mode='constant', constant_values=255) if (pad_top or pad_bot) else binary
+    src     = (np.pad(binary, ((pad_top, pad_bot), (0, 0)),
+                      mode='constant', constant_values=255)
+               if (pad_top or pad_bot) else binary)
 
     map_x    = np.tile(np.arange(W, dtype=np.float32), (H, 1))
     row_grid = np.tile(np.arange(H, dtype=np.float32)[:, None], (1, W))
@@ -575,10 +543,12 @@ def straighten_line(
             return binary
 
     def _norm_width(img: np.ndarray) -> int:
+        # Ancho normalizado al alto objetivo, usado para detectar deformaciones.
         r = np.where((img < 128).any(axis=1))[0]
         if len(r) == 0:
             return 1
-        return max(16, int(round(img.shape[1] * TARGET_HEIGHT / max(1, int(r[-1]) - int(r[0]) + 1))))
+        return max(16, int(round(img.shape[1] * TARGET_HEIGHT /
+                                 max(1, int(r[-1]) - int(r[0]) + 1))))
 
     if _norm_width(result) > _norm_width(binary) * 1.8:
         return binary
@@ -592,12 +562,8 @@ def rotate_strip_by_baseline(
     min_ink_frac:  float = 0.003,
     max_angle_deg: float = 20.0,
 ) -> tuple[np.ndarray, float]:
-    """
-    Estima el ángulo medio de la línea por centroides en rebanadas verticales
-    y devuelve una versión rotada del strip alineada horizontalmente.
-
-    Retorna (rotated_strip, angle_deg). Si no se aplica rotación, angle_deg=0.0.
-    """
+    # Estima el angulo medio de una linea por centroides en rebanadas verticales
+    # y devuelve la strip rotada alineada horizontalmente.
     H, W = strip.shape[:2]
     if H < 4 or W < 8:
         return strip, 0.0
@@ -630,12 +596,12 @@ def rotate_strip_by_baseline(
     except np.linalg.LinAlgError:
         return strip, 0.0
 
-    # Rechazo de outliers IQR
+    # Rechazo de outliers por IQR
     if len(ys_arr) >= 4:
         q1, q3 = np.percentile(ys_arr, [25, 75])
-        fence   = max((q3 - q1) * 1.5, 4.0)
-        med     = float(np.median(ys_arr))
-        mask    = np.abs(ys_arr - med) <= fence
+        fence  = max((q3 - q1) * 1.5, 4.0)
+        med    = float(np.median(ys_arr))
+        mask   = np.abs(ys_arr - med) <= fence
         if mask.sum() >= 2:
             xs_arr, ys_arr = xs_arr[mask], ys_arr[mask]
             try:
@@ -645,8 +611,7 @@ def rotate_strip_by_baseline(
         else:
             return strip, 0.0
 
-    # Guardia R²: umbral 0.60 (ajuste lineal grado 1; más permisivo que el 0.72
-    # de straighten_line que usa polinomio de mayor grado)
+    # Guardia R^2: umbral 0.60 (lineal grado 1; mas permisivo que straighten_line)
     predicted = coeffs[0] * xs_arr + coeffs[1]
     ss_res    = float(np.sum((ys_arr - predicted) ** 2))
     ss_tot    = float(np.sum((ys_arr - float(ys_arr.mean())) ** 2))

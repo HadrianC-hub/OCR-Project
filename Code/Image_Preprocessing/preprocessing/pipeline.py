@@ -18,9 +18,11 @@ from preprocessing.line_processing import (
 )
 
 
-# 1. ANÁLISIS DE IMAGEN Y AUTO-CONFIGURACIÓN
+# 1. ANALISIS DE IMAGEN Y AUTO-CONFIGURACION
 
 def analyze(img: np.ndarray) -> ImageMetrics:
+    # Calcula metricas de la imagen (contraste, luminancia, altura de texto
+    # estimada, ruido de fondo) para alimentar a auto_config.
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img.copy()
     H, W = gray.shape
 
@@ -30,9 +32,9 @@ def analyze(img: np.ndarray) -> ImageMetrics:
 
     margin  = max(10, min(H, W) // 12)
     # Excluir franjas laterales antes de muestrear las esquinas: artefactos de
-    # encuadernación (bandas oscuras) en el borde izquierdo/derecho del escáner
-    # empujarían la media por debajo de 127 y harían dark_background=True
-    # aunque el fondo real de la página sea blanco.
+    # encuadernacion (bandas oscuras) en el borde izquierdo/derecho del escaner
+    # empujarian la media por debajo de 127 y harian dark_background=True
+    # aunque el fondo real de la pagina sea blanco.
     border_frac = max(0.06, min(0.15, 100.0 / max(W, 1)))
     cx0 = int(W * border_frac)
     cx1 = W - cx0
@@ -92,6 +94,7 @@ def analyze(img: np.ndarray) -> ImageMetrics:
 
 
 def auto_config(img: np.ndarray) -> PipelineConfig:
+    # Construye un PipelineConfig adaptado a la imagen a partir de su analisis.
     m = analyze(img)
 
     use_clahe  = m.contrast < 60
@@ -121,7 +124,7 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
         use_remove_bg=False,
         line_v_dilation=max(2, int(m.estimated_text_h * 0.12)),
         # min_line_height: valor adaptativo basado en la altura estimada del texto.
-        # El defecto (24px) es demasiado alto para texto comprimido o baja resolución.
+        # El defecto (24px) es demasiado alto para texto comprimido o baja resolucion.
         min_line_height=max(8, int(m.estimated_text_h * 0.35)),
         expand_to_ink=True,
         straighten_lines=True,
@@ -130,10 +133,12 @@ def auto_config(img: np.ndarray) -> PipelineConfig:
     )
 
 
-# 2. DETECCIÓN DE BLOQUES DE TEXTO (XY-Cut de 3 niveles)
+# 2. DETECCION DE BLOQUES DE TEXTO (XY-Cut de 3 niveles)
 
 def _find_h_separators(binary: np.ndarray, min_gap_h: int = 0,
                         threshold_frac: float = 0.04) -> list[int]:
+    # Localiza huecos horizontales (filas casi sin tinta) y devuelve sus
+    # coordenadas Y; sirven para cortar la pagina en secciones verticales.
     H, W    = binary.shape
     if min_gap_h <= 0:
         min_gap_h = max(100, H // 30)
@@ -163,6 +168,8 @@ def _find_column_separators(
     max_n_cols: int = 4, smooth_size: int = 0,
     min_depth: float = 0.28,
 ) -> list[int]:
+    # Encuentra hasta `max_n_cols - 1` separadores verticales (gutters) entre
+    # columnas de texto buscando valles profundos en la proyeccion vertical.
     H, W          = binary.shape
     smooth_size   = smooth_size   or max(20, W // 20)
     min_gap_width = min_gap_width or max(10, W // 50)
@@ -187,27 +194,27 @@ def _find_column_separators(
         depth = (lp - vv) / lp if lp > 0 else 0.0
         if depth < min_depth or not (W * 0.15 < vi < W * 0.85):
             continue
-        # Detección bilateral del hueco (gutter): se camina desde cada pico
+        # Deteccion bilateral del hueco (gutter): se camina desde cada pico
         # hacia el otro hasta que la densidad cae por debajo de un umbral
-        # situado a media profundidad del valle. `gL` marca dónde termina la
-        # caída desde el pico izquierdo (≈ derecha del texto izquierdo); `gR`
-        # dónde empieza la subida hacia el pico derecho (≈ izquierda del
+        # situado a media profundidad del valle. `gL` marca donde termina la
+        # caida desde el pico izquierdo (derecha del texto izquierdo); `gR`
+        # donde empieza la subida hacia el pico derecho (izquierda del
         # texto derecho). El separador se coloca en el centro de [gL, gR].
         #
-        # Esto reemplaza la elección anterior basada en argmin, que en libros
-        # con encuadernación central daba resultados sesgados: la zona del lomo
-        # introduce moteado de tinta (densidad ~0.3 × pico) que no rompe la
-        # condición de "valle" pero desplaza el mínimo absoluto hacia uno de
-        # los dos lados, dejando el separador pegado al borde de la página
+        # Esto reemplaza la eleccion anterior basada en argmin, que en libros
+        # con encuadernacion central daba resultados sesgados: la zona del lomo
+        # introduce moteado de tinta (densidad ~0.3 * pico) que no rompe la
+        # condicion de "valle" pero desplaza el minimo absoluto hacia uno de
+        # los dos lados, dejando el separador pegado al borde de la pagina
         # vecina y permitiendo que sus letras iniciales se filtren al bbox de
         # la columna actual.
         #
-        # El umbral a media profundidad (vv + (lp-vv)*0.5 ≈ punto medio entre
-        # fondo del valle y la cresta más baja) es el compromiso correcto: si
-        # se pone demasiado cerca del fondo del valle (≤ 0.15) los gutters
-        # estrechos —típicos cuando la encuadernación no genera moteado— dan
+        # El umbral a media profundidad (vv + (lp-vv)*0.5, punto medio entre
+        # fondo del valle y la cresta mas baja) es el compromiso correcto: si
+        # se pone demasiado cerca del fondo del valle (<= 0.15) los gutters
+        # estrechos, tipicos cuando la encuadernacion no genera moteado, dan
         # un ancho de hueco insuficiente y se rechazan; si se pone cerca del
-        # pico (≥ 0.80) cualquier rebaje de densidad se cuenta como gutter y
+        # pico (>= 0.80) cualquier rebaje de densidad se cuenta como gutter y
         # el separador se desplaza dentro del cuerpo de texto.
         gutter_thr = vv + (lp - vv) * 0.5
         gL = peaks[i]
@@ -236,6 +243,8 @@ def _find_column_separators(
 
 
 def _col_x_boundaries(W: int, separators: list[int], margin: int = 0) -> list[tuple[int, int]]:
+    # Convierte una lista de separadores verticales en rangos (x0, x1) por columna,
+    # aplicando un pequeno margen lateral.
     margin = margin or max(3, W // 150)
     boundaries = [0] + separators + [W]
     return [
@@ -248,7 +257,7 @@ def _col_x_boundaries(W: int, separators: list[int], margin: int = 0) -> list[tu
 def _group_into_paragraphs(
     line_ys: list[tuple[int, int]], threshold_factor: float = 2.5
 ) -> list[list[tuple[int, int]]]:
-    """Agrupa líneas en párrafos por análisis de huecos relativos."""
+    """Agrupa lineas en parrafos por analisis de huecos relativos."""
     if not line_ys: return []
     if len(line_ys) == 1: return [line_ys]
     gaps      = [line_ys[i + 1][0] - line_ys[i][1] for i in range(len(line_ys) - 1)]
@@ -311,12 +320,12 @@ def segment_all(
     cfg:    PipelineConfig,
 ) -> tuple[list[tuple[int, int, int, int]], list[tuple[int, int, int, int]]]:
     """
-    Segmentación XY-Cut de 3 niveles:
-      1. Separadores horizontales globales → secciones
-      2. Separadores verticales por sección → columnas
-      3. Sub-separadores dentro de cada columna → sub-secciones
-      4. detect_lines dentro de cada sub-sección
-      5. Agrupación en párrafos y medición x-extent por tinta real
+    Segmentacion XY-Cut de 3 niveles:
+      1. Separadores horizontales globales -> secciones
+      2. Separadores verticales por seccion -> columnas
+      3. Sub-separadores dentro de cada columna -> sub-secciones
+      4. detect_lines dentro de cada sub-seccion
+      5. Agrupacion en parrafos y medicion x-extent por tinta real
 
     Retorna (line_boxes, block_boxes), ambas como (y_top, y_bot, x_left, x_right).
     """
@@ -337,7 +346,7 @@ def segment_all(
 
     all_blocks: list[tuple[tuple, list]] = []
     min_h_vsplit  = max(500, H // 7)
-    min_h_section = max(50,  H // 50)
+    min_h_section = max(min_line_h, H // 50)  # fix: 50 hardcoded causaba que imagenes < 50px se saltaran por completo
     margin        = max(4, W // 200)
 
     for (y0, y1) in h_sections:
@@ -375,11 +384,11 @@ def segment_all(
                 line_ys     = detect_lines(sub_cell, cfg)
                 para_groups = _group_into_paragraphs(line_ys, threshold_factor=para_split)
 
-                # Calcular el x-extent UNA VEZ por sub-sección, sobre TODAS las
-                # líneas detectadas. Calcularlo por párrafo (como antes) hace
-                # que un párrafo encabezado por una línea sangrada (p. ej.
-                # "Apretó el instrumento.") fije `para_x0` al borde de la
-                # sangría; las líneas siguientes del párrafo, que llegan al
+                # Calcular el x-extent UNA VEZ por sub-seccion, sobre TODAS las
+                # lineas detectadas. Calcularlo por parrafo (como antes) hace
+                # que un parrafo encabezado por una linea sangrada (p. ej.
+                # "Apreto el instrumento.") fije `para_x0` al borde de la
+                # sangria; las lineas siguientes del parrafo, que llegan al
                 # margen real de la columna, quedan cortadas por la izquierda.
                 sx0_sub  = max(0, x0 - margin)
                 sx1_sub  = min(W, x1 + margin)
@@ -411,8 +420,8 @@ def segment_all(
                                    for (yt, yb) in para_lines]
 
                     # accent_guard: margen superior extra para que expand_all_boxes
-                    # pueda alcanzar acentos de mayúsculas que quedan por encima
-                    # del y_top detectado en la primera línea del párrafo.
+                    # pueda alcanzar acentos de mayusculas que quedan por encima
+                    # del y_top detectado en la primera linea del parrafo.
                     para_h       = abs_y1 - abs_y0
                     accent_guard = max(5, int(para_h * 0.08))
                     all_blocks.append(((max(0, abs_y0 - accent_guard), abs_y1, sub_x0, sub_x1), block_lines))
@@ -435,9 +444,10 @@ def segment_all(
     return h_lines + b_lines, h_blks + b_blks
 
 
-# 3. CONVERSIÓN Y DESKEW
+# 3. CONVERSION Y DESKEW
 
 def load_image(path: str | Path) -> np.ndarray:
+    # Lee un archivo de imagen desde disco con soporte para rutas Unicode.
     buf = np.fromfile(str(path), dtype=np.uint8)
     img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
     if img is None:
@@ -446,6 +456,7 @@ def load_image(path: str | Path) -> np.ndarray:
 
 
 def to_gray(img: np.ndarray, cfg: PipelineConfig) -> np.ndarray:
+    # Convierte la imagen a escala de grises, usando el canal azul si cfg lo indica.
     if img.ndim == 2:
         return img
     return img[:, :, 0] if cfg.use_blue_channel else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -456,14 +467,14 @@ def deskew_image(
     max_angle: float = 15.0,
 ) -> tuple[np.ndarray, float]:
     """
-    Corrige la inclinación global del documento.
+    Corrige la inclinacion global del documento.
 
-    Usa HoughLinesP ponderando por longitud² para que los baselines largos dominen
-    la estimación sobre los trazos oblicuos de letras individuales (~5-12°).
+    Usa HoughLinesP ponderando por longitud^2 para que los baselines largos dominen
+    la estimacion sobre los trazos oblicuos de letras individuales (~5-12 grados).
     La mediana ponderada con guardia IQR descarta distribuciones multimodales
-    (mezcla de letras y líneas rectas) antes de rotar.
-    El color de borde se estima como mediana de los píxeles de las 4 aristas para
-    evitar bandas negras de escáner en las esquinas rotadas.
+    (mezcla de letras y lineas rectas) antes de rotar.
+    El color de borde se estima como mediana de los pixeles de las 4 aristas para
+    evitar bandas negras de escaner en las esquinas rotadas.
     """
     h, w  = gray.shape
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -512,16 +523,16 @@ def deskew_image(
     M = cv2.getRotationMatrix2D((w // 2, h // 2), median_angle, 1.0)
     border_pixels = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
     bg_val        = int(np.median(border_pixels))
-    # Interpolación CÚBICA en grises. Antes se usaba INTER_NEAREST aquí mismo y
-    # eso producía aliasing fuerte: cada píxel rotado tomaba el valor del más
-    # cercano de la cuadrícula original sin promediar, así que en ángulos no
-    # múltiplos de 90° las letras quedaban "movidas" — los bordes oblicuos se
-    # convertían en una escalera de saltos discretos en vez de un degradado.
-    # Tras la binarización Sauvola (que reacciona localmente a esos saltos)
+    # Interpolacion CUBICA en grises. Antes se usaba INTER_NEAREST aqui mismo y
+    # eso producia aliasing fuerte: cada pixel rotado tomaba el valor del mas
+    # cercano de la cuadricula original sin promediar, asi que en angulos no
+    # multiplos de 90 grados las letras quedaban "movidas": los bordes oblicuos
+    # se convertian en una escalera de saltos discretos en vez de un degradado.
+    # Tras la binarizacion Sauvola (que reacciona localmente a esos saltos)
     # esa escalera se transforma en bordes irregulares y caracteres torcidos.
-    # INTER_CUBIC reconstruye cada píxel con una vecindad 4×4 ponderada, así
+    # INTER_CUBIC reconstruye cada pixel con una vecindad 4x4 ponderada, asi
     # los bordes en gris quedan suavizados y Sauvola produce binarios mucho
-    # más limpios. Se usa NEAREST en cambio para imágenes ya binarizadas.
+    # mas limpios. Se usa NEAREST en cambio para imagenes ya binarizadas.
     corrected     = cv2.warpAffine(gray, M, (w, h),
                                    flags=cv2.INTER_CUBIC,
                                    borderMode=cv2.BORDER_CONSTANT,
@@ -536,8 +547,8 @@ def estimate_block_skew(
     n_fine:    int   = 21,
 ) -> float:
     """
-    Estima el ángulo de un bloque maximizando la varianza de la proyección H.
-    Barrido coarse-to-fine: grueso sobre imagen reducida (≤600px), fino sobre la original.
+    Estima el angulo de un bloque maximizando la varianza de la proyeccion H.
+    Barrido coarse-to-fine: grueso sobre imagen reducida (<= 600px), fino sobre la original.
     """
     H, W = binary.shape
     if H < 20 or W < 40:
@@ -570,6 +581,8 @@ def estimate_block_skew(
 
 
 def deskew_block(binary: np.ndarray, max_angle: float = 15.0) -> tuple[np.ndarray, float]:
+    # Rota un bloque binario para corregir su inclinacion local residual,
+    # devolviendo (imagen_rotada, angulo).
     angle = estimate_block_skew(binary, max_angle=max_angle)
     if abs(angle) < 0.3:
         return binary, 0.0
@@ -589,17 +602,17 @@ def _process_strip(
     label: str = "",
 ) -> "tuple | None":
     """
-    Núcleo de procesado de una franja binaria de línea:
+    Nucleo de procesado de una franja binaria de linea:
       oriented-crop -> straighten_line -> trim_orphan_components -> trim vertical
-      -> normalize_line -> filtro de tinta mínima.
+      -> normalize_line -> filtro de tinta minima.
 
     Devuelve (norm, ang, new_top, new_bot, clean_strip) o None si debe descartarse.
       - norm: array float32 [0,1] de altura fija (para OCR).
-      - ang: ángulo de rotación oriented (informativo).
-      - new_top, new_bot: rango Y dentro del strip ORIGINAL que cubre la línea
-        principal una vez ajustada a la tinta real (sin huérfanos).
+      - ang: angulo de rotacion oriented (informativo).
+      - new_top, new_bot: rango Y dentro del strip ORIGINAL que cubre la linea
+        principal una vez ajustada a la tinta real (sin huerfanos).
       - clean_strip: strip uint8 binarizado y limpio (rotado/straightened y sin
-        tinta de líneas vecinas), recortado al rango Y de la línea principal.
+        tinta de lineas vecinas), recortado al rango Y de la linea principal.
         Listo para guardar como JPG.
     """
     if strip.size == 0:
@@ -624,13 +637,13 @@ def _process_strip(
         strip = straighten_line(strip, poly_degree=cfg.straighten_poly,
                                 n_slices=cfg.straighten_slices)
 
-    # Limpieza de huérfanos: elimina descenders/ascenders/manchas de líneas
+    # Limpieza de huerfanos: elimina descenders/ascenders/manchas de lineas
     # adyacentes que se cuelan en el padding superior o inferior del strip.
     if getattr(cfg, "trim_orphans_per_line", True):
         strip = trim_orphan_components(strip)
 
-    # Recorte vertical apretado a la banda principal (con margen mínimo) sobre
-    # el strip ya limpio. Esto define new_top/new_bot que se usarán para
+    # Recorte vertical apretado a la banda principal (con margen minimo) sobre
+    # el strip ya limpio. Esto define new_top/new_bot que se usaran para
     # mapear el bbox al sistema de coordenadas del binary global.
     rows_clean = np.where((strip < 128).any(axis=1))[0]
     if rows_clean.size == 0:
@@ -643,13 +656,13 @@ def _process_strip(
 
     clean_strip = strip[new_top:new_bot, :]
 
-    # Recorte HORIZONTAL apretado al rango con tinta. Sin esto, una línea
-    # corta de fin de párrafo (p. ej. "necía.") queda como una mancha de
+    # Recorte HORIZONTAL apretado al rango con tinta. Sin esto, una linea
+    # corta de fin de parrafo (p. ej. "necia.") queda como una mancha de
     # ~100 px de tinta en un lienzo de ~572 px (el ancho del bloque); tras
-    # normalize_line + redimensionado a altura fija, la fracción de tinta
-    # cae por debajo del 0.02 que exige el filtro final, y la línea se
-    # descarta erróneamente. Recortando primero por columnas con tinta, la
-    # densidad se recupera y la línea pasa el filtro.
+    # normalize_line + redimensionado a altura fija, la fraccion de tinta
+    # cae por debajo del 0.02 que exige el filtro final, y la linea se
+    # descarta erroneamente. Recortando primero por columnas con tinta, la
+    # densidad se recupera y la linea pasa el filtro.
     cols_clean = np.where((clean_strip < 128).any(axis=0))[0]
     if cols_clean.size == 0:
         return None
@@ -670,11 +683,11 @@ def _process_strip(
     if float((norm < 0.5).mean()) < 0.02:
         return None
 
-    # Las coordenadas new_top/new_bot están en el sistema del strip POSIBLEMENTE
+    # Las coordenadas new_top/new_bot estan en el sistema del strip POSIBLEMENTE
     # rotado. Se devuelven tal cual; pipeline.run las usa relativas al strip
     # original al construir el bbox global, asumiendo que el rotado preserva
-    # aproximadamente las coordenadas (estamos hablando de ángulos < 5° en
-    # general). Esa aproximación es suficiente para visualización del bbox.
+    # aproximadamente las coordenadas (estamos hablando de angulos < 5 grados
+    # en general). Esa aproximacion es suficiente para visualizacion del bbox.
     return norm, ang, new_top, new_bot, clean_strip
 
 
@@ -686,17 +699,17 @@ def _process_with_block_deskew(
     global_angle: float = 0.0,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[tuple[int, int, int, int]]]:
     """
-    Para cada bloque: deskew local residual -> re-detección de líneas -> expand -> straighten -> normalize.
+    Para cada bloque: deskew local residual -> re-deteccion de lineas -> expand -> straighten -> normalize.
 
-    El deskew global ya fue aplicado sobre toda la imagen antes de llamar aquí.
-    La corrección local solo se aplica cuando el crop es suficientemente alto
-    (≥ block_min_h_for_skew) y el ángulo residual supera block_residual_threshold.
+    El deskew global ya fue aplicado sobre toda la imagen antes de llamar aqui.
+    La correccion local solo se aplica cuando el crop es suficientemente alto
+    (>= block_min_h_for_skew) y el angulo residual supera block_residual_threshold.
 
     Retorna (lines_normalized, line_crops_uint8, line_boxes).
     """
     if cfg.debug:
         print(f"[_process_with_block_deskew] {len(block_boxes)} bloques  "
-              f"global_angle={global_angle:.2f}°")
+              f"global_angle={global_angle:.2f}deg")
 
     lines:       list[np.ndarray]               = []
     line_crops:  list[np.ndarray]               = []
@@ -730,13 +743,13 @@ def _process_with_block_deskew(
                                           borderMode=cv2.BORDER_CONSTANT, borderValue=255)
                 if cfg.debug:
                     print(f"  [deskew_blocks] y=[{by0},{by1}] x=[{bx0},{bx1}] "
-                          f"h={crop_h}px residual={residual:.2f}° → corregido")
+                          f"h={crop_h}px residual={residual:.2f}deg -> corregido")
 
         line_ys = detect_lines(rotated, cfg)
         if not line_ys:
             continue
 
-        # Solo líneas cuyo centro cae dentro del bloque original (sin el padding)
+        # Solo lineas cuyo centro cae dentro del bloque original (sin el padding)
         block_top_in_crop = by0 - crop_y0
         block_bot_in_crop = by1 - crop_y0
         line_ys = [
@@ -749,11 +762,11 @@ def _process_with_block_deskew(
         bW          = rotated.shape[1]
         boxes_local = [(yt, yb, 0, bW) for (yt, yb) in line_ys]
         if cfg.expand_to_ink:
-            # accent_margin: margen pequeño para capturar acentos/ascendentes que
+            # accent_margin: margen pequeno para capturar acentos/ascendentes que
             # sobresalen levemente del y_top detectado. NO debe ser tan grande como
-            # pad_v (que sirve para cargar contexto de líneas adyacentes), porque
-            # si safe_crop abarca múltiples secciones, expand_all_boxes puede cruzar
-            # la frontera del bloque y generar cajas enormes que mezclan párrafos.
+            # pad_v (que sirve para cargar contexto de lineas adyacentes), porque
+            # si safe_crop abarca multiples secciones, expand_all_boxes puede cruzar
+            # la frontera del bloque y generar cajas enormes que mezclan parrafos.
             accent_margin = min(20, max(5, int(block_h * 0.02)))
             safe_y0       = max(0,               block_top_in_crop - accent_margin)
             safe_y1       = min(rotated.shape[0], block_bot_in_crop + accent_margin)
@@ -780,23 +793,23 @@ def _process_with_block_deskew(
             norm, _ang, new_top, new_bot, clean_strip = result
             lines.append(norm)
             line_crops.append(clean_strip)
-            # bbox global apretado: new_top/new_bot ya están ajustados a la
-            # tinta limpia del strip, sin padding extra. NO añadimos safe_pad
+            # bbox global apretado: new_top/new_bot ya estan ajustados a la
+            # tinta limpia del strip, sin padding extra. NO anadimos safe_pad
             # ni vert_pad: eso era lo que causaba que los bbox absorbieran
-            # descenders/ascenders de las líneas vecinas.
+            # descenders/ascenders de las lineas vecinas.
             g_top = max(0,     crop_y0 + yt + new_top)
             g_bot = min(H_bin, crop_y0 + yt + new_bot)
             valid_boxes.append((g_top, g_bot, bx0 + xl, bx0 + xr))
 
-    # Deduplicación entre bloques solapados. `segment_all` añade un margen
+    # Deduplicacion entre bloques solapados. `segment_all` anade un margen
     # superior `accent_guard` a cada bloque para que `expand_to_ink` pueda
     # alcanzar acentos; cuando dos bloques contiguos quedan separados por una
-    # distancia menor que ese margen (típico cuando el detector partió la
-    # página en tres tramos: sup, medio, inf), las primeras líneas del tramo
-    # inferior caen también dentro del padding del tramo superior. detect_lines
-    # las captura dos veces — una por bloque — generando crops idénticos.
-    # Aquí descartamos las repetidas comparando por bbox: si la última línea
-    # añadida cubre prácticamente la misma zona Y/X que la actual, conservamos
+    # distancia menor que ese margen (tipico cuando el detector partio la
+    # pagina en tres tramos: sup, medio, inf), las primeras lineas del tramo
+    # inferior caen tambien dentro del padding del tramo superior. detect_lines
+    # las captura dos veces, una por bloque, generando crops identicos.
+    # Aqui descartamos las repetidas comparando por bbox: si la ultima linea
+    # anadida cubre practicamente la misma zona Y/X que la actual, conservamos
     # la primera y omitimos la segunda.
     if len(valid_boxes) >= 2:
         dedup_lines:  list[np.ndarray] = []
@@ -837,10 +850,10 @@ def run(
 ) -> PipelineResult:
     """
     Ejecuta el pipeline completo sobre una imagen o ruta de archivo.
-    Si cfg es None se llama a auto_config() automáticamente.
-    Camino A (estándar): deskew global → binarización → mask binding →
-                         segmentación → straighten → trim huérfanos → normalize.
-    Camino B (deskew_blocks): igual que A pero con corrección local de inclinación por bloque.
+    Si cfg es None se llama a auto_config() automaticamente.
+    Camino A (estandar): deskew global -> binarizacion -> mask binding ->
+                         segmentacion -> straighten -> trim huerfanos -> normalize.
+    Camino B (deskew_blocks): igual que A pero con correccion local de inclinacion por bloque.
     """
     warns: list[str] = []
 
@@ -853,7 +866,7 @@ def run(
     if cfg.deskew:
         gray, global_angle = deskew_image(gray, max_angle=cfg.deskew_max_angle)
         if cfg.debug and abs(global_angle) > 0.1:
-            print(f"  [pipeline] Deskew global: {global_angle:.2f}°")
+            print(f"  [pipeline] Deskew global: {global_angle:.2f}deg")
 
     binary = binarize(
         img=gray,
@@ -872,11 +885,16 @@ def run(
     if cfg.min_component_area > 0:
         binary = filter_small_components(binary, cfg.min_component_area)
 
-    # Enmascarar las franjas oscuras laterales (encuadernación / borde del libro)
-    # ANTES de cualquier detección de líneas o bloques. Esto pinta esas columnas
+    # Enmascarar las franjas oscuras laterales (encuadernacion / borde del libro)
+    # ANTES de cualquier deteccion de lineas o bloques. Esto pinta esas columnas
     # a blanco en `binary`, lo que elimina el artefacto en TODA la cadena
     # (proyecciones, bbox, crops finales) sin necesidad de parches posteriores.
-    if getattr(cfg, 'mask_binding', True):
+    # Guardia: en imagenes muy bajas (recortes de linea unica, H < 3 * min_line_height)
+    # la densidad de tinta por columna (ink_px / H) es artificialmente alta y los
+    # trazos normales de letras superan el umbral del 30 %, lo que hace que
+    # mask_binding_strips borre palabras enteras en los extremos izquierdo/derecho.
+    _mask_binding_min_h = 3 * cfg.min_line_height
+    if getattr(cfg, 'mask_binding', True) and binary.shape[0] >= _mask_binding_min_h:
         binary, x_left_safe, x_right_safe = mask_binding_strips(
             binary,
             max_frac=cfg.binding_max_frac,
@@ -895,7 +913,7 @@ def run(
         block_boxes = [(0, H_i, 0, W_i)]
 
     if len(boxes_4d) == 0 and not cfg.deskew_blocks:
-        warns.append("No se detectaron líneas de texto.")
+        warns.append("No se detectaron lineas de texto.")
         return PipelineResult(lines=[], line_boxes=[], line_crops=[],
                               block_boxes=block_boxes,
                               binary=binary, deskew_angle=global_angle,
@@ -910,12 +928,12 @@ def run(
             binary, block_boxes, cfg, warns, global_angle=global_angle,
         )
 
-    # Camino estándar (también fallback si deskew_blocks no extrajo líneas)
+    # Camino estandar (tambien fallback si deskew_blocks no extrajo lineas)
     if not lines:
         if cfg.deskew_blocks:
             warns.append(
-                "deskew_blocks activo pero no se extrajeron líneas. "
-                "Reintentando con camino estándar (sin deskew por bloque)."
+                "deskew_blocks activo pero no se extrajeron lineas. "
+                "Reintentando con camino estandar (sin deskew por bloque)."
             )
         if cfg.expand_to_ink and boxes_4d:
             boxes_4d = expand_all_boxes(
@@ -950,6 +968,8 @@ def run(
 # 6. DEBUG
 
 def _save_debug(gray, binary, boxes, block_boxes, out_dir):
+    # Guarda en disco las imagenes intermedias del pipeline (gris, binaria y
+    # visualizacion con bboxes) para inspeccion visual.
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     for name, img in [("gray.png", gray), ("binary.png", binary)]:

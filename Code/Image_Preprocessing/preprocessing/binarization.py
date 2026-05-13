@@ -1,11 +1,11 @@
-import numpy as np
 import cv2
+import numpy as np
 from scipy.ndimage import uniform_filter
 
 
 DEFAULT_WINDOW = 51
 DEFAULT_K      = 0.18
-DEFAULT_R      = 128.0  # rango dinámico fijo para imágenes 8-bit
+DEFAULT_R      = 128.0   # rango dinamico fijo para imagenes 8-bit
 
 
 def sauvola(
@@ -16,30 +16,13 @@ def sauvola(
     global_floor_pct: float = 0.0,
     pre_blur:         float = 0.6,
 ) -> np.ndarray:
-    """
-    Binarización Sauvola con desenfoque previo opcional para suavizar bordes.
-
-    `pre_blur` aplica un Gaussian de sigma muy pequeño (≤ 1 px) sobre la
-    imagen en grises ANTES de calcular media y varianza. Sauvola reacciona
-    localmente a la varianza, así que si la imagen tiene ruido fino de JPEG
-    (compresión, halo cromático, granulado del escáner) Sauvola amplifica
-    esas micro-variaciones a píxeles binarios sueltos: el resultado son
-    bordes "dentados" cuando los caracteres deberían tener trazos limpios.
-    Un blur de ~0.6 σ suaviza ese ruido sin difuminar los trazos reales
-    (los trazos del texto suelen tener ≥ 2 px de grosor) y deja los bordes
-    de Sauvola mucho más regulares. Se aplica solo a grayscale puro; en
-    binarización pura (cuando la imagen ya viene como blanco/negro) hay que
-    llamar con `pre_blur=0`.
-    """
+    # Binarizacion Sauvola con pre-blur opcional y piso global anti-ruido.
     if img_gray.ndim != 2:
         raise ValueError(f"Se esperaba imagen 2D, recibido shape {img_gray.shape}")
     if window % 2 == 0:
         window += 1
 
     if pre_blur and pre_blur > 0.0:
-        # ksize=0 deja a OpenCV elegir el tamaño a partir de sigma; con
-        # σ ≤ 1 produce una ventana 3×3 efectiva, así que la pérdida de
-        # detalle es despreciable.
         img_for_stats = cv2.GaussianBlur(img_gray, (0, 0), sigmaX=pre_blur, sigmaY=pre_blur)
     else:
         img_for_stats = img_gray
@@ -53,12 +36,8 @@ def sauvola(
     threshold = mean * (1.0 + k * (std / r - 1.0))
     binary    = np.where(img < threshold, 0, 255).astype(np.uint8)
 
-    # Piso global: fuerza a fondo los píxeles por encima del percentil dado.
-    # Solo se aplica si el valor de piso cae claramente por encima del umbral
-    # de Otsu + margen; de lo contrario podría borrar tinta real en imágenes
-    # de bajo contraste.
     if global_floor_pct > 0.0:
-        floor_val = float(np.percentile(img_gray, global_floor_pct))
+        floor_val   = float(np.percentile(img_gray, global_floor_pct))
         otsu_thr, _ = cv2.threshold(
             img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )
@@ -75,6 +54,7 @@ def auto_tune_sauvola_k(
     target_ink: tuple = (0.07, 0.16),
     max_iter: int = 5,
 ) -> float:
+    # Ajusta k iterativamente para llevar la fraccion de tinta al rango objetivo.
     k = k_init
     thr = np.percentile(gray, 90)
     mask = gray < thr
@@ -100,6 +80,7 @@ def enhance_contrast(
     clip_limit: float = 2.5,
     tile_size:  int   = 16,
 ) -> np.ndarray:
+    # CLAHE para realzar contraste local en zonas oscuras.
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
     return clahe.apply(gray)
 
@@ -110,6 +91,7 @@ def bilateral_denoise(
     sigma_color: float = 75.0,
     sigma_space: float = 75.0,
 ) -> np.ndarray:
+    # Denoising bilateral: suaviza fondos preservando bordes de letras.
     return cv2.bilateralFilter(gray, diameter, sigma_color, sigma_space)
 
 
@@ -117,6 +99,7 @@ def normalize_illumination(
     gray:        np.ndarray,
     kernel_size: int = 0,
 ) -> np.ndarray:
+    # Compensa iluminacion no uniforme dividiendo por el fondo estimado.
     H, W = gray.shape
     if kernel_size <= 0:
         kernel_size = max(25, min(H, W) // 15)
@@ -132,21 +115,7 @@ def normalize_illumination(
 
 
 def _background_uniformity(gray: np.ndarray) -> float:
-    """
-    Mide la uniformidad de iluminación del fondo.
-
-    Estrategia: estimar el "fondo" tomando el percentil 90 local en una
-    rejilla 4×4 sobre la imagen (esos píxeles son por construcción los más
-    claros de cada zona, es decir, papel sin tinta). Si la iluminación es
-    uniforme, esos valores serán muy parecidos en toda la rejilla; si hay
-    sombras, gradientes o vignetting, variarán mucho.
-
-    Retorna la desviación estándar (en niveles 0-255) entre las 16 muestras
-    de fondo. Valores típicos:
-       <  6  → fondo muy uniforme  (escaneo plano de libro, hoja blanca)
-       6-15 → fondo levemente desigual
-       > 15 → iluminación irregular, sombras, encuadernación pesada
-    """
+    # Mide cuanto varia el percentil 90 entre 16 sub-tiles (proxy de uniformidad de fondo).
     H, W = gray.shape
     if H < 32 or W < 32:
         return float(gray.std())
@@ -179,36 +148,12 @@ def binarize(
     remove_bg_kernel: int   = 0,
     method:           str   = "auto",
 ) -> np.ndarray:
-    """
-    Binariza una imagen. `method`:
-      - 'auto'    : decide automáticamente. Si el fondo es uniforme
-                    (escaneo limpio de libro/hoja), usa Otsu — produce
-                    trazos del grosor natural sin engordarlos. Si la
-                    iluminación es irregular (sombras, gradientes), usa
-                    Sauvola que se adapta localmente.
-      - 'otsu'    : fuerza Otsu global (rápido, trazos finos, exige fondo
-                    uniforme)
-      - 'sauvola' : fuerza Sauvola con auto-tune de k (robusto frente a
-                    iluminación variable, pero engorda trazos un 15-25%
-                    sobre el grosor natural por su propia formulación)
-
-    Justificación del default 'auto': Sauvola es la opción "segura" pero
-    produce binarios consistentemente más gruesos que Otsu en escaneos con
-    fondo uniforme — su umbral local mean*(1 + k*(std/r - 1)) queda por
-    encima del umbral global Otsu cuando el contraste local es alto, y eso
-    convierte píxeles del borde del trazo (semioscuros por anti-aliasing del
-    escáner) en tinta. En libros con fondo limpio eso se traduce en letras
-    "infladas" y manchadas. Otsu evita ese sesgo a costa de no adaptarse a
-    iluminación variable, así que enrutamos por uniformidad de fondo.
-    """
-
+    # Orquestador: pre-proceso opcional, eleccion otsu/sauvola y binarizacion.
     if img.ndim == 3:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     else:
         gray = img.copy()
 
-    # normalize_illumination debe ir antes del bilateral para que este trabaje
-    # sobre una imagen sin variaciones lentas de iluminación.
     if use_remove_bg:
         gray = normalize_illumination(gray, kernel_size=remove_bg_kernel)
 
@@ -222,26 +167,20 @@ def binarize(
     chosen = method
     if chosen == "auto":
         bg_std = _background_uniformity(gray)
-        # Umbral 12: por debajo el fondo es razonablemente uniforme y Otsu
-        # gana en fidelidad de grosor; por encima Sauvola compensa mejor
-        # las variaciones locales. Empíricamente 8-12 es la frontera.
         chosen = "otsu" if bg_std < 12.0 else "sauvola"
 
     if chosen == "otsu":
-        # Otsu sobre la imagen entera: produce trazos del grosor natural
-        # del raster original. El threshold sale del bimodal del histograma.
-        # Un blur muy ligero (σ=0.5) reduce ruido fino del escáner sin
-        # alterar el bimodal — lo mismo que hace Sauvola con pre_blur.
         gray_for_otsu = cv2.GaussianBlur(gray, (0, 0), sigmaX=0.5, sigmaY=0.5)
         _, binary = cv2.threshold(gray_for_otsu, 0, 255,
                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        # global_floor_pct sigue funcionando si el caller lo pidió
+        # global_floor_pct sigue funcionando si el caller lo pidio
         if global_floor_pct > 0.0:
             floor_val = float(np.percentile(gray, global_floor_pct))
-            otsu_thr  = float(np.unique(gray_for_otsu[binary == 255]).min()) if (binary == 255).any() else 128.0
+            otsu_thr  = (float(np.unique(gray_for_otsu[binary == 255]).min())
+                         if (binary == 255).any() else 128.0)
             if floor_val > otsu_thr + 10:
                 binary[gray >= floor_val] = 255
-    else:  # sauvola
+    else:
         k      = auto_tune_sauvola_k(gray, window=window, k_init=k)
         binary = sauvola(gray, window=window, k=k, r=r,
                          global_floor_pct=global_floor_pct)
@@ -257,6 +196,7 @@ def clean_binary(
     morph_open:  int = 0,
     morph_close: int = 0,
 ) -> np.ndarray:
+    # Apertura/clausura morfologica para eliminar ruido puntual o cerrar trazos.
     result = binary.copy()
     if morph_open > 0:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_open, morph_open))
@@ -272,6 +212,7 @@ def filter_small_components(
     min_area_px:   int,
     max_area_frac: float = 0.10,
 ) -> np.ndarray:
+    # Conserva componentes con area entre min_area_px y max_area_frac*HW.
     H, W     = binary.shape
     max_area = int(H * W * max_area_frac)
     fg = (binary < 128).astype(np.uint8)
@@ -285,6 +226,7 @@ def filter_small_components(
 
 
 def _noise_gap_threshold(areas: np.ndarray) -> int:
+    # Detecta el salto entre ruido y trazos reales en la distribucion de areas.
     GAP_RATIO       = 2.5
     MAX_NOISE_AREA  = 50
     MIN_NOISE_COUNT = 5
@@ -306,6 +248,7 @@ def adaptive_filter_components(
     binary:        np.ndarray,
     max_area_frac: float = 0.10,
 ) -> np.ndarray:
+    # Filtra componentes pequenos usando umbral adaptativo (gap natural).
     H, W     = binary.shape
     max_area = int(H * W * max_area_frac)
     fg = (binary < 128).astype(np.uint8)
@@ -334,49 +277,20 @@ def mask_binding_strips(
     max_frac:      float = 0.15,
     density_thr:   float = 0.30,
 ) -> tuple[np.ndarray, int, int]:
-    """
-    Enmascara las franjas oscuras de encuadernación o el borde del libro en los
-    laterales izquierdo y derecho de la imagen binarizada. Esas franjas suelen
-    aparecer como columnas con tinta en >30% de las filas (binding del libro
-    comprimido al escanear).
-
-    Algoritmo:
-      1. Marcar cada columna en [0, max_x] como `binding` si su densidad de
-         tinta supera `density_thr`.
-      2. Enmascarar desde el borde izquierdo hasta la última columna `binding`
-         detectada (inclusive). Esto cubre tanto el núcleo opaco como las
-         columnas residuales tras una zona de transición — caso común de
-         escáneres en los que el binding deja una raya fina más al interior.
-      3. Extensión por umbral secundario: tras la última columna binding,
-         seguir hacia el interior mientras la siguiente columna tenga densidad
-         >= density_thr * 0.7. Captura rayas finas residuales (~0.20-0.29) que
-         quedan justo por debajo del umbral principal pero claramente por
-         encima del fondo limpio (<0.05). Permite hasta 2 columnas vacías
-         intermedias antes de detenerse.
-      4. Mismo procedimiento para el lado derecho.
-
-    Esta limpieza se hace una sola vez en el pipeline, antes de detectar líneas
-    y bloques, lo que elimina el artefacto en TODA la cadena (proyecciones,
-    bbox, crops finales).
-
-    Retorna:
-        (binary_limpia, x_left_safe, x_right_safe)
-        x_left_safe: primera columna válida desde la izquierda (0 si no hay binding).
-        x_right_safe: última columna válida + 1 (W si no hay binding derecho).
-    """
+    # Enmascara franjas oscuras laterales (encuadernacion, borde de libro).
     H, W = binary.shape
     if W < 20:
         return binary, 0, W
 
     ink_col = (binary < 128).mean(axis=0)
     max_x   = max(1, int(W * max_frac))
-    sec_thr = density_thr * 0.7  # umbral secundario para extensión
+    sec_thr = density_thr * 0.7   # umbral secundario para extension
 
     # Lado izquierdo
     left_band = ink_col[:max_x] >= density_thr
     if left_band.any():
         rightmost = int(np.where(left_band)[0].max())
-        # Extensión hacia el interior con umbral secundario
+        # Extension hacia el interior con umbral secundario
         gap = 0
         i   = rightmost + 1
         while i < max_x and gap <= 2:
@@ -390,7 +304,7 @@ def mask_binding_strips(
     else:
         x_left_safe = 0
 
-    # Lado derecho (simétrico)
+    # Lado derecho (simetrico)
     right_band = ink_col[W - max_x:] >= density_thr
     if right_band.any():
         leftmost_global = (W - max_x) + int(np.where(right_band)[0].min())
@@ -424,26 +338,7 @@ def trim_orphan_components(
     band_thr:     float = 0.15,
     y_tol_frac:   float = 0.30,
 ) -> np.ndarray:
-    """
-    Limpia un strip de línea de texto eliminando componentes conexos cuyo
-    centroide Y caiga fuera de la banda principal de tinta. Esto remueve las
-    "patas" de descenders o tildes de líneas adyacentes que se cuelan en los
-    bordes superior/inferior del strip cuando la segmentación deja padding.
-
-    Algoritmo:
-      1. Banda principal = filas con tinta >= `band_thr` × pico de proyección H.
-      2. Tolerancia vertical = `y_tol_frac` × altura de la banda.
-      3. Componentes con centroide Y dentro de [main_top - tol, main_bot + tol]
-         se conservan. Los demás se borran (puestos a 255).
-
-    El centroide Y de un componente con descender (p, g, q) cae dentro de la
-    banda principal porque la mayor parte de su masa está en x-height. Lo mismo
-    para acentos: el centroide del componente unido (cuerpo + tilde) está dentro
-    de la banda. Solo se eliminan trozos disjuntos de líneas adyacentes.
-
-    Si la banda principal no se puede determinar de forma robusta, el strip se
-    devuelve sin cambios.
-    """
+    # Elimina componentes huerfanos: tinta de lineas vecinas en el padding.
     H, W = strip_binary.shape
     if H < 4 or W < 4:
         return strip_binary
@@ -461,14 +356,6 @@ def trim_orphan_components(
     if len(band_rows) < 2:
         return strip_binary
 
-    # Aislar el bloque CONTIGUO más denso. Un fragmento de tinta aislado en un
-    # solo extremo del strip (manchas del borde del escáner, tildes residuales)
-    # supera el umbral pero forma una "isla" muy pequeña; si se permitiera
-    # extender la banda principal hasta esa fila, `main_top`/`main_bot` se
-    # estiran de borde a borde y la limpieza por banda Y deja de eliminar nada.
-    # Buscamos por tanto la corrida más larga de filas consecutivas que
-    # superan el umbral y la usamos como banda principal; un margen de 1 fila
-    # admite bajadas puntuales (cortes de "g", "p", etc.).
     runs: list[tuple[int, int]] = []
     cur_start = int(band_rows[0])
     prev      = int(band_rows[0])
@@ -485,31 +372,15 @@ def trim_orphan_components(
     main_top, main_bot = runs[0]
     if (main_bot - main_top) < 2:
         return strip_binary
-    band_h   = main_bot - main_top
-    tol      = max(2, int(band_h * y_tol_frac))
-    y_min    = main_top - tol
-    y_max    = main_bot + tol
+    band_h = main_bot - main_top
+    tol    = max(2, int(band_h * y_tol_frac))
+    y_min  = main_top - tol
+    y_max  = main_bot + tol
 
     n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(fg, connectivity=8)
     if n_labels < 2:
         return strip_binary
 
-    # Heurística adicional contra el lomo / encuadernación central: en un libro
-    # escaneado a doble página queda un trazo vertical fino entre las dos
-    # páginas. Cuando el separador de columnas se sitúa muy cerca de él, ese
-    # trazo se cuela en el borde lateral del strip de cada línea de la página
-    # vecina como uno o varios fragmentos muy estrechos (1-4 px de ancho) que
-    # rotan + straighten suelen partir en trozos de altura variable.
-    # Descartamos cualquier componente que cumpla:
-    #   – es estrecho: w ≤ 4 px;
-    #   – pega contra el borde izquierdo o derecho del strip (≤ 5 % del ancho);
-    #   – está claramente desplazado del cuerpo del texto: su centroide X cae
-    #     fuera del rango de centroides del resto de componentes de la banda
-    #     principal (es decir, no convive con tinta real cercana en X).
-    # Esta combinación es muy específica del lomo: textos legítimos cerca del
-    # borde (p. ej. una "i" al principio de la línea) tienen otros componentes
-    # vecinos en X (las letras siguientes), así que el centroide del fragmento
-    # cae dentro del rango.
     edge_band = max(2, int(W * 0.05))
 
     main_band_cxs: list[float] = []
@@ -517,21 +388,21 @@ def trim_orphan_components(
         cy = float(centroids[label_id, 1])
         if y_min <= cy <= y_max:
             x, _, w, _, _ = stats[label_id]
-            if w > 4:  # solo letras "anchas" definen el cuerpo del texto
+            if w > 4:   # solo letras anchas definen el cuerpo del texto
                 main_band_cxs.append(float(centroids[label_id, 0]))
 
     keep_mask = np.zeros(n_labels, dtype=bool)
-    keep_mask[0] = True  # fondo
+    keep_mask[0] = True   # fondo
     for label_id in range(1, n_labels):
         cy = float(centroids[label_id, 1])
         if not (y_min <= cy <= y_max):
             continue
         x, y, w, h, _ = stats[label_id]
-        x_right = x + w
+        x_right    = x + w
         is_thin    = (w <= 4)
         hugs_edge  = (x < edge_band) or (x_right > W - edge_band)
         if is_thin and hugs_edge and main_band_cxs:
-            cx = float(centroids[label_id, 0])
+            cx       = float(centroids[label_id, 0])
             text_min = min(main_band_cxs)
             text_max = max(main_band_cxs)
             isolated = (cx < text_min - W * 0.04) or (cx > text_max + W * 0.04)
