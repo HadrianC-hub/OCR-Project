@@ -1,11 +1,3 @@
-"""
-model.py  —  CRNN+CTC para reconocimiento de texto manuscrito/impreso.
-
-Arquitectura: CNN (5 bloques) → AdaptiveAvgPool → BiLSTM × num_layers → FC → log_softmax
-Stride horizontal acumulado: 4 (CNN_STRIDE=4 en dataset.py)
-Restricción CTC: ancho_imagen ≥ longitud_etiqueta × 4
-"""
-
 import torch
 import torch.nn as nn
 
@@ -21,28 +13,29 @@ class CRNN(nn.Module):
         dropout:     float = 0.2,
     ):
         super().__init__()
-        # La altura se reduce ×16 por los 4 MaxPool: mínimo 16 px.
+        # Altura se reduce x16 (4 MaxPool x2): necesitamos al menos 16px
         assert img_height % 16 == 0, "img_height debe ser divisible entre 16"
 
         self.cnn = nn.Sequential(
-            # Bloque 1: [B, 1, H, W] → [B, 64, H/2, W/2]
+            # Bloque 1: → [B, 64, H/2, W/2]
             nn.Conv2d(1, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
-            # Bloque 2: MaxPool 2×2 — reduce ancho también → [B, 128, H/4, W/4]
+            # Bloque 2: MaxPool 2×2 → [B, 128, H/4, W/4]  ← stride ancho x2
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
-            # Bloques 3-4: MaxPool solo en altura → el ancho queda fijo en W/4
+            # Bloque 3: → [B, 256, H/8, W/4]
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=(2, 1), stride=(2, 1)),
 
+            # Bloque 4: → [B, 256, H/16, W/4]
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
@@ -54,7 +47,6 @@ class CRNN(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        # Colapsa la dimensión de altura → [B, 256, 1, T]  con T = W/4
         self.adaptive_pool = nn.AdaptiveAvgPool2d((1, None))
 
         self.rnn = nn.LSTM(
@@ -85,7 +77,6 @@ class CRNN(nn.Module):
                 nn.init.orthogonal_(p)
             elif "bias" in name:
                 nn.init.zeros_(p)
-                # Sesgo de puerta de olvido a 1 para estabilizar el entrenamiento inicial.
                 n = p.size(0)
                 p.data[n // 4 : n // 2].fill_(1.0)
         for m in self.fc.modules():
@@ -94,11 +85,11 @@ class CRNN(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feat = self.cnn(x)                          # [B, 256, H/16, T]
-        feat = self.adaptive_pool(feat)             # [B, 256, 1, T]
+        feat = self.cnn(x)
+        feat = self.adaptive_pool(feat)           # [B, 256, 1, T]
         B, C, _, T = feat.shape
-        feat = feat.squeeze(2).permute(0, 2, 1)    # [B, T, 256]
-        out, _ = self.rnn(feat)                     # [B, T, 2·hidden]
-        out = self.fc(out)                          # [B, T, vocab]
-        out = out.permute(1, 0, 2)                  # [T, B, vocab]  — formato requerido por CTCLoss
+        feat = feat.squeeze(2).permute(0, 2, 1)   # [B, T, 256]
+        out, _ = self.rnn(feat)                   # [B, T, 512]
+        out = self.fc(out)                        # [B, T, vocab]
+        out = out.permute(1, 0, 2)                # [T, B, vocab]
         return torch.log_softmax(out, dim=2)

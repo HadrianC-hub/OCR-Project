@@ -1,13 +1,10 @@
 import argparse
 from pathlib import Path
-
 import torch
 from torchvision import transforms
 from PIL import Image
-
 from model   import CRNN
 from dataset import decode_ctc_beam, autocrop_whitespace, IMG_HEIGHT, CNN_STRIDE
-
 
 
 def get_device() -> torch.device:
@@ -41,6 +38,8 @@ def transcribe_image(
     beam_width: int  = 10,
     blank_bonus: float = 2.0,
     length_norm_alpha: float = 0.65,
+    lm=None,
+    lm_alpha: float = 0.4,
 ) -> str:
     img = Image.open(img_path).convert("L")
     img = autocrop_whitespace(img, threshold=200, padding=2)
@@ -57,6 +56,7 @@ def transcribe_image(
     with torch.no_grad():
         log_probs = model(x)   # [T, 1, vocab]
 
+    # Solo pasos válidos (sin padding — aquí no hay padding porque es una sola imagen)
     valid_t = x.shape[3] // CNN_STRIDE
     lp_np = log_probs[:valid_t].squeeze(1).cpu().float().numpy()   # [T, vocab]
     seq   = [lp_np[t].tolist() for t in range(len(lp_np))]
@@ -65,6 +65,8 @@ def transcribe_image(
         beam_width=beam_width,
         blank_bonus=blank_bonus,
         length_norm_alpha=length_norm_alpha,
+        lm=lm,
+        lm_alpha=lm_alpha,
     )
 
 
@@ -73,9 +75,30 @@ if __name__ == "__main__":
     parser.add_argument("checkpoint",          help="Ruta al checkpoint .pt")
     parser.add_argument("input",               help="Imagen .png/.jpg o carpeta")
     parser.add_argument("--beam_width",        type=int,   default=10)
-    parser.add_argument("--blank_bonus",       type=float, default=2.0)
-    parser.add_argument("--length_norm_alpha", type=float, default=0.65)
+    parser.add_argument("--blank_bonus",       type=float, default=2.0,
+                        help="Bonus para blank en beam search (evita sobre-generación)")
+    parser.add_argument("--length_norm_alpha", type=float, default=0.65,
+                        help="Exponente de normalización de longitud en beam search")
+    parser.add_argument("--lm_path",           type=str,   default=None,
+                        help="Ruta al modelo KenLM .arpa para shallow fusion (opcional)")
+    parser.add_argument("--lm_alpha",          type=float, default=0.4,
+                        help="Peso del modelo de lenguaje (recomendado 0.3–0.5)")
     args = parser.parse_args()
+
+    # Cargar LM si se especifica
+    lm_model, lm_alpha = None, 0.0
+    if args.lm_path:
+        try:
+            import kenlm
+            from pathlib import Path as _Path
+            if _Path(args.lm_path).exists():
+                lm_model = kenlm.Model(args.lm_path)
+                lm_alpha = args.lm_alpha
+                print(f"[LM] Modelo cargado: {args.lm_path}  |  α={lm_alpha}")
+            else:
+                print(f"[LM] Archivo no encontrado: {args.lm_path} — beam sin LM")
+        except ImportError:
+            print("[LM] kenlm no instalado — beam sin LM")
 
     model, cfg, device = load_model(args.checkpoint)
     h = cfg.get("img_height", IMG_HEIGHT)
@@ -94,5 +117,7 @@ if __name__ == "__main__":
             beam_width=args.beam_width,
             blank_bonus=args.blank_bonus,
             length_norm_alpha=args.length_norm_alpha,
+            lm=lm_model,
+            lm_alpha=lm_alpha,
         )
         print(f"{p.name:<40} {text}")

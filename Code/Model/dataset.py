@@ -2,16 +2,12 @@ import os
 import math
 from pathlib import Path
 from typing import List, Tuple
-
 import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset, Subset, Sampler
 from torchvision import transforms
 from PIL import Image, ImageFilter
-
-
-# --- Transformaciones de aumento ---
 
 class RandomHorizontalScale:
     def __init__(self, scale_range: tuple = (0.55, 1.60)):
@@ -25,13 +21,12 @@ class RandomHorizontalScale:
 
 
 class RandomStrokeWidth:
-    """Simula variaciones de grosor de trazo con erosión/dilatación morfológica."""
     def __call__(self, img: Image.Image) -> Image.Image:
         r = random.random()
         if r < 0.20:
-            return img.filter(ImageFilter.MinFilter(3))   # adelgaza trazos
+            return img.filter(ImageFilter.MinFilter(3))
         elif r < 0.40:
-            return img.filter(ImageFilter.MaxFilter(3))   # engrosa trazos
+            return img.filter(ImageFilter.MaxFilter(3))
         return img
 
 
@@ -43,20 +38,13 @@ class RandomNoise:
         std = random.uniform(self.lo, self.hi)
         return (tensor + torch.randn_like(tensor) * std).clamp(-1.0, 1.0)
 
-
-# --- Constantes globales ---
-
 DATA_DIR   = os.environ.get("OCR_DATA_DIR",   "images")
 VOCAB_PATH = os.environ.get("OCR_VOCAB_PATH", "vocab/vocab.txt")
 IMG_HEIGHT = 64
 CNN_STRIDE = 4
 BLANK_IDX  = 100
 
-
-# --- Preprocesamiento de imagen ---
-
 def autocrop_whitespace(img: Image.Image, threshold: int = 200, padding: int = 2) -> Image.Image:
-    """Recorta márgenes blancos conservando un margen de `padding` píxeles."""
     arr = np.array(img)
     ink_mask = arr < threshold
     rows = np.any(ink_mask, axis=1)
@@ -75,14 +63,9 @@ def autocrop_whitespace(img: Image.Image, threshold: int = 200, padding: int = 2
 
     return img.crop((c_min, r_min, c_max + 1, r_max + 1))
 
-
 def get_font_label(img_path: Path) -> str:
-    """Extrae la etiqueta de fuente del nombre de archivo (todo menos el sufijo numérico)."""
     parts = Path(img_path).stem.split("_")
     return "_".join(parts[:-1]) if len(parts) > 1 else Path(img_path).stem
-
-
-# --- Vocabulario ---
 
 def load_vocab(path: str | Path = VOCAB_PATH) -> Tuple[dict, dict]:
     vocab_path = Path(path)
@@ -113,10 +96,7 @@ def encode(text: str) -> List[int]:
     return [CHAR2IDX[c] for c in text if c in CHAR2IDX]
 
 
-# --- Decodificación CTC ---
-
 def _log_add(a: float, b: float) -> float:
-    """Suma estable en espacio logarítmico: log(exp(a) + exp(b))."""
     if a == float('-inf'):
         return b
     if b == float('-inf'):
@@ -127,7 +107,6 @@ def _log_add(a: float, b: float) -> float:
 
 
 def decode_ctc(indices: List[int]) -> str:
-    """Decodificación greedy CTC: colapsa repetidos y elimina blanks."""
     result, prev = [], None
     for idx in indices:
         if idx != BLANK_IDX and idx != prev:
@@ -141,19 +120,11 @@ def decode_ctc_beam(
     beam_width: int = 10,
     blank_bonus: float = 2.0,
     length_norm_alpha: float = 0.65,
+    lm=None,
+    lm_alpha: float = 0.4,
 ) -> str:
-    """
-    Beam search CTC con normalización de longitud.
-
-    Mantiene dos scores por hipótesis: p_b (termina en blank) y p_nb (no blank).
-    Esta separación es necesaria para manejar correctamente la duplicación de
-    caracteres en CTC: el mismo carácter puede repetirse si va separado por un blank.
-
-    blank_bonus: penaliza expansiones de caracteres reales, evita hiper-segmentación.
-    length_norm_alpha: exponente de normalización, análogo al GNMT length penalty.
-    """
     NEG_INF = float('-inf')
-    beams = {(): (0.0, NEG_INF)}  # {seq: (p_b, p_nb)}
+    beams = {(): (0.0, NEG_INF)}
 
     for log_probs_t in log_probs_seq:
         new_beams: dict = {}
@@ -169,8 +140,6 @@ def decode_ctc_beam(
                 else:
                     ext = seq + (c,)
                     if seq and seq[-1] == c:
-                        # Repetición del último carácter: solo p_nb contribuye a ext,
-                        # p_total contribuye a mantener seq (blank intermedio implícito).
                         pb, pnb = new_beams.get(seq, (NEG_INF, NEG_INF))
                         new_beams[seq] = (pb, _log_add(pnb, p_nb + lp))
                         pb, pnb = new_beams.get(ext, (NEG_INF, NEG_INF))
@@ -188,13 +157,14 @@ def decode_ctc_beam(
     def _normed_score(seq):
         raw  = _log_add(beams[seq][0], beams[seq][1])
         norm = max(len(seq), 1) ** length_norm_alpha
-        return raw / norm
+        lm_score = 0.0
+        if lm is not None and seq:
+            text = "".join(IDX2CHAR.get(c, "") for c in seq)
+            lm_score = lm_alpha * lm.score(text, bos=True, eos=True) * math.log(10)
+        return raw / norm + lm_score
 
     best = max(beams.keys(), key=_normed_score)
     return "".join(IDX2CHAR.get(c, "") for c in best)
-
-
-# --- Dataset ---
 
 class OCRDataset(Dataset):
     def __init__(
@@ -207,9 +177,9 @@ class OCRDataset(Dataset):
         self.img_height = img_height
         self.augment    = augment
 
-        # Caché de anchos (idx → px escalado a img_height).
-        # Se llena una sola vez con precompute_widths() y se reutiliza
-        # en todos los folds de CV y LOFO.
+        # Caché de anchos (idx → ancho en px escalado a img_height)
+        # Se llena la primera vez en precompute_widths() o bajo demanda en
+        # BucketBatchSampler. No requiere cambios en __getitem__.
         self._width_cache: dict[int, int] = {}
 
         if not self.root.exists():
@@ -271,10 +241,11 @@ class OCRDataset(Dataset):
             transforms.Lambda(lambda t: RandomNoise(std_range=(0.0, 0.05))(t)),
         ])
 
+    # Precomputar TODOS los anchos de una vez
     def precompute_widths(self) -> None:
-        """Pre-calcula los anchos escalados de todas las imágenes.
-        Llamar una sola vez antes de construir los BucketBatchSamplers;
-        los folds de CV y LOFO reutilizan el caché.
+        """Calcula y cachea los anchos escalados de todas las imágenes.
+        Llamar una sola vez desde train() antes de construir cualquier
+        BucketBatchSampler; los folds de CV y LOFO reutilizan el caché.
         """
         n = len(self.samples)
         missing = [i for i in range(n) if i not in self._width_cache]
@@ -298,8 +269,6 @@ class OCRDataset(Dataset):
         img = autocrop_whitespace(img, threshold=200, padding=2)
         w, h = img.size
 
-        # Jitter de altura durante augmentación — obliga al modelo a ser robusto
-        # a variaciones de escala vertical, no solo horizontal.
         if self.augment and torch.rand(1).item() > 0.40:
             jitter_h = random.randint(
                 max(44, self.img_height // 2 + 5),
@@ -319,13 +288,7 @@ class OCRDataset(Dataset):
     def get_font_labels(self, indices: List[int]) -> List[str]:
         return [get_font_label(self.samples[i][0]) for i in indices]
 
-
-# --- NoAugSubset ---
-
 class NoAugSubset(Subset):
-    """Subset que siempre aplica la transformación base (sin augmentación).
-    Se usa para el conjunto de validación aunque el dataset padre tenga augment=True.
-    """
     def __getitem__(self, idx: int):
         img_path, text = self.dataset.samples[self.indices[idx]]
         img = Image.open(img_path).convert("L")
@@ -337,19 +300,19 @@ class NoAugSubset(Subset):
         label  = torch.tensor(encode(text), dtype=torch.long)
         return tensor, label, text
 
-
-# --- BucketBatchSampler ---
-
 class BucketBatchSampler(Sampler):
     """
-    Agrupa imágenes con anchos similares en el mismo batch.
+    Agrupa muestras con anchos de imagen similares en el mismo batch.
 
-    Reduce el padding horizontal desperdiciado en cada batch, lo que disminuye
-    el uso de VRAM y acelera el entrenamiento. Las imágenes se ordenan por ancho,
-    se dividen en n_buckets grupos y dentro de cada grupo se mezclan aleatoriamente.
-
-    width_cache: dict {idx_global → ancho} precomputado por OCRDataset.precompute_widths().
-    Si se pasa, evita reabrir miles de imágenes en cada construcción del sampler.
+    Parámetros:
+        subset      — OCRDataset o Subset resultante de random_split
+        batch_size  — tamaño de batch
+        shuffle     — mezcla el orden de los batches en cada época
+        n_buckets   — número de grupos de ancho (10 suele ser suficiente)
+        seed        — semilla para reproducibilidad
+        width_cache — dict {idx_global → ancho} precomputado por OCRDataset.
+                      Si se pasa, evita reabrir imágenes. Pasar siempre que esté
+                      disponible (ej. full_ds._width_cache).
     """
     def __init__(self, subset, batch_size: int, shuffle: bool = True,
                  n_buckets: int = 10, seed: int = 42,
@@ -366,6 +329,8 @@ class BucketBatchSampler(Sampler):
             indices  = np.arange(len(subset))
 
         h = base_ds.img_height
+
+        # Usar caché si está disponible, calcular solo lo que falte
         cache = width_cache if width_cache is not None else getattr(base_ds, "_width_cache", None)
 
         if cache is not None:
@@ -417,9 +382,6 @@ class BucketBatchSampler(Sampler):
 
     def __len__(self):
         return len(self.batches)
-
-
-# --- collate_fn ---
 
 def collate_fn(batch):
     """Padding horizontal a la derecha hasta el ancho máximo del batch."""
