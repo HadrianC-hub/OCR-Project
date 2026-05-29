@@ -11,7 +11,7 @@ CORPUS_DIR  = "Corpus"
 FONTS_DIR   = "Fonts"
 OUTPUT_DIR  = "Generated"
 
-TOTAL_IMAGES = 20000
+TOTAL_IMAGES = 2000
 FONT_SIZE    = 80
 
 MIN_TOKENS = 5
@@ -28,7 +28,6 @@ ENABLE_TYPEWRITER_FX = True
 
 # FRECUENCIAS OBJETIVO DE LA GENERACIÓN POR CARACTER
 FRECUENCIAS_OBJETIVO = {
-
     # ── Vocales minúsculas (Grupo A) ──────────────────────────────────────────
     "a": 10.2, "e": 11.5, "i":  5.3, "o":  7.5, "u":  3.1,
 

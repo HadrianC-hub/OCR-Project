@@ -28,7 +28,7 @@ from preprocessing.pipeline        import run, analyze, auto_config
 from preprocessing.line_preprocess import preprocess_line, LineConfig
 
 
-INPUT_PATH       = Path("images")
+INPUT_PATH       = Path("Generated")
 OUTPUT_DIR       = Path("results")
 SINGLE_LINE_MODE = True
 
