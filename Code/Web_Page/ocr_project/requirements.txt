@@ -1,53 +1,34 @@
-# ════════════════════════════════════════════════════════════════════════════
-#  ArchivoOCR — Dependencias
-# ════════════════════════════════════════════════════════════════════════════
-#  Instalación:
-#      pip install -r requirements.txt
-# ════════════════════════════════════════════════════════════════════════════
-
-# ── Framework Django ─────────────────────────────────────────────────────────
+# Django
 Django==4.2.30
 psycopg2-binary==2.9.11
 python-dotenv==1.2.2
 
-# ── Imagen / documentos ──────────────────────────────────────────────────────
-Pillow==12.2.0
+# Imagen y documentos
+Pillow>=10.0.0
 ebooklib==0.20
 reportlab==4.4.10
 
-# ── OCR / Preprocesado ───────────────────────────────────────────────────────
-# Modelo CRNN+CTC impreso (ocr_predict.py) y modelo HTR CRNN-Lite v2
-# manuscrito (apps/ocr/manuscript_predictor.py).
+# OCR y preprocesado
 torch>=2.0.0
 torchvision>=0.15.0
 numpy>=1.24.0
-
-# Pipeline de preprocesado (preprocessing/)
 opencv-python>=4.7.0
 scipy>=1.10.0
+scikit-image>=0.21.0
 
-# ── Corrección ortográfica post-OCR (apps/ocr/spell_correct.py) ──────────────
-# SymSpell + wordfreq son OBLIGATORIOS para la corrección base.
-# Ambos paquetes traen sus datos dentro del paquete pip.
+# Modelo HTR manuscrito (TrOCR fine-tuneado)
+transformers>=4.50.0
+sentencepiece>=0.2.1
+accelerate>=0.34.0
+safetensors>=0.4.0
+
+# Corrección ortográfica
 symspellpy>=6.7.0
 wordfreq>=3.0.0
 
-# ── Reranker BERT opcional (BETO ONNX) ───────────────────────────────────────
-# Opcionales para la corrección con contexto (use_bert=True). Si no se
-# instalan, la corrección cae a SymSpell solo de forma elegante.
-# Plus el modelo ONNX en models/beto/  (ver INSTALL.md).
+# Reranker BERT opcional (ONNX)
 onnxruntime>=1.16.0
-transformers>=4.30.0
 
-# ── SRI (Sistema de Recuperación de Información) ─────────────────────────────
-# BM25 para re-ranking híbrido junto con E5. Implementación pura Python
-# (solo numpy, que ya está arriba).
+# Búsqueda
 rank_bm25>=0.2.2
-
-# Búsqueda semántica con multilingual-e5-small (apps/search/encoder.py).
-# Si no está instalado, el sistema degrada a búsqueda solo por metadatos
-# y BM25. Plus el modelo en models/multilingual-e5-small/  (ver INSTALL.md).
-# NOTA: sentence-transformers arrastra `transformers` y `huggingface-hub`
-# como dependencias transitivas; mantenemos `transformers` arriba en su
-# sección porque también lo necesita el reranker BERT.
 sentence-transformers>=2.2.0

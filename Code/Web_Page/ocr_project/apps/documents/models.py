@@ -72,12 +72,8 @@ class Page(models.Model):
     """
     Una página facsimilar de un documento.
 
-    NOTA: el texto transcrito NO se almacena en la base de datos. Vive en
-        {MEDIA_ROOT}/transcripts/{document_id}/page_{order:03d}.xml
-    en formato XML simple (ver docs/transcript_format.md).
-
-    El acceso se hace a través del *property* `text` (compatible con el
-    código antiguo: `page.text`, `page.text = "..."`, `{{ page.text }}`)
+    El texto transcrito se guarda en {MEDIA_ROOT}/transcripts/{document_id}/page_{order:03d}.xml
+    y se accede mediante la property `text`.
     o explícitamente vía get_text()/set_text(). Las regiones definidas
     por el usuario también viven en ese XML; ver get_regions()/set_regions().
 

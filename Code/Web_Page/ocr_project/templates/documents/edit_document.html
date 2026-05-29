@@ -114,12 +114,6 @@
           </button>
         </div>
         <div class="card-body p-0 overflow-auto" style="max-height:55vh; text-align:center; background:#f8f9fa">
-          {# Si la página todavía no terminó su OCR, el endpoint de
-             segmentación devolvería 503. En vez de pedir la imagen y
-             que falle, mostramos un placeholder y dejamos que el
-             polling de estado (ver el JS de polling más abajo)
-             recargue la página cuando el OCR complete: entonces la
-             cache estará lista y la <img> apuntará al JPG generado. #}
           {% if current_page.ocr_status == 'done' %}
           <img id="segmentationImg"
                src="{% url 'line_segmentation_image' current_page.id %}"
@@ -133,10 +127,6 @@
             <span class="small fst-italic">Generando segmentación…</span>
           </div>
           {% endif %}
-        </div>
-        <div class="card-footer bg-body-tertiary py-1 text-muted small">
-          Las cajas se generan a partir del facsimilar deskewed. Los colores
-          identifican líneas (L#) y bloques (B#) detectados por el pipeline.
         </div>
       </div>
       {% endif %}
@@ -184,7 +174,6 @@
                         {% if is_processing %}readonly{% endif %}
                         placeholder="Texto transcrito para esta página…">{{ current_page.text }}</textarea>
             {% else %}
-              {# Página aún no lista — mostramos estado en lugar del textarea #}
               <div id="ocrWaitingPanel"
                    class="d-flex flex-column align-items-center justify-content-center text-center px-3"
                    style="min-height: 22em;"
@@ -194,7 +183,6 @@
                   <h5 class="mb-2">Procesando OCR de esta página</h5>
                   <p class="text-muted mb-0">
                     El texto aparecerá aquí cuando termine.
-                    La página se recargará automáticamente.
                   </p>
                 {% elif current_page.ocr_status == 'pending' %}
                   <i class="bi bi-hourglass-split display-4 text-secondary mb-3"></i>
@@ -318,6 +306,14 @@
     </div><!-- /right col -->
   </div><!-- /row -->
 
+  {% if is_processing %}
+  <div id="ocrStatusPoller"
+       data-poll-url="{% url 'document_ocr_status' doc.id %}"
+       data-current-page-id="{{ current_page.id|default:'' }}"
+       data-current-page-status="{{ current_page.ocr_status|default:'done' }}"
+       style="display:none"></div>
+  {% endif %}
+
   <!-- Thumbnail strip -->
   {% if pages|length > 1 %}
   <div class="d-flex gap-2 mt-3 overflow-auto pb-2" id="thumbsStrip">
@@ -362,18 +358,10 @@
     {% endfor %}
   </div>
 
-  {# Si hay páginas pendientes, marcamos el contenedor para que el JS
-     active el polling. data-poll-url indica el endpoint a sondear. #}
-  <div id="ocrStatusPoller"
-       data-poll-url="{% url 'document_ocr_status' doc.id %}"
-       data-current-page-id="{{ current_page.id|default:'' }}"
-       data-current-page-status="{{ current_page.ocr_status|default:'done' }}"
-       style="display:none"></div>
   {% endif %}
 
 </form>
 
-{# ── Modal de aviso al salir mientras hay procesamiento en curso ─────── #}
 {% if is_processing %}
 <div class="modal fade" id="abandonModal" tabindex="-1" aria-labelledby="abandonModalLabel" aria-hidden="true" data-bs-backdrop="static">
   <div class="modal-dialog modal-dialog-centered">
@@ -385,7 +373,6 @@
       </div>
       <div class="modal-body">
         {% if is_first_time %}
-          {# Primera vez: doc recién subido, sin save previo. Abandonar = borrar. #}
           <p class="mb-2">
             El OCR de este documento aún no ha terminado. Tu trabajo
             no se ha guardado y <strong>todavía no se puede guardar</strong>.
@@ -400,7 +387,6 @@
             Para conservarlo, vuelve y espera a que termine el OCR.
           </p>
         {% else %}
-          {# Doc con histórico de save: NO se borra, solo sale. #}
           <p class="mb-2">
             El OCR está procesando alguna página de este documento.
             Tus cambios recientes <strong>no están guardados</strong>.
@@ -632,7 +618,6 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 {% if is_processing %}
-{# ── Guardia de navegación: documento en proceso = no guardable ─────── #}
 <script>
 (function() {
   'use strict';

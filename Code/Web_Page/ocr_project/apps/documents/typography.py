@@ -55,7 +55,40 @@ def reflow_paragraphs(text: str) -> List[str]:
     return paragraphs
 
 
-def _join_lines(lines: List[str]) -> str:
+def split_blocks(text: str) -> List[List[str]]:
+    """
+    Divide el texto en bloques separados por líneas en blanco.
+    Cada bloque es una lista de líneas individuales (sin unir).
+    A diferencia de reflow_paragraphs, preserva los saltos de línea
+    dentro de cada bloque, lo que es esencial para conservar la
+    estructura visual de poesía y verso.
+
+    Ejemplo:
+        >>> split_blocks("Verso uno\\nVerso dos\\n\\nOtro párrafo")
+        [['Verso uno', 'Verso dos'], ['Otro párrafo']]
+    """
+    if not text:
+        return []
+
+    blocks: List[List[str]] = []
+    current: List[str] = []
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if current:
+                blocks.append(current)
+                current = []
+        else:
+            current.append(line)
+
+    if current:
+        blocks.append(current)
+
+    return blocks
+
+
+
     """Une líneas físicas en un párrafo, gestionando guiones de fin-de-línea."""
     if not lines:
         return ""

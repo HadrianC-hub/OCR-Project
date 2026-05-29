@@ -32,10 +32,6 @@ def _doc_matches_text(doc, query_lower: str) -> bool:
     Devuelve True si el texto transcrito de cualquier página de `doc`
     contiene `query_lower` (búsqueda case-insensitive).
 
-    NOTA DE ESCALA: leemos los XML de las páginas en disco. Para archivos
-    pequeños/medianos (cientos de docs, miles de páginas) esto va bien.
-    A escala mayor, conviene añadir un índice de búsqueda (PostgreSQL
-    full-text con tsvector recomputado al escribir el XML, Whoosh, etc.).
     """
     for page in doc.pages.all():
         if query_lower in page.get_text().lower():
@@ -335,11 +331,18 @@ def edit_document(request, doc_id):
             base_url = reverse('edit_document', args=[doc_id])
             return redirect(f'{base_url}?page={target}')
 
-        # Flujo normal (sin processing): guardar texto y metadatos
+        # Flujo normal (sin processing): guardar texto y metadatos.
+        # Detectamos qué páginas cambiaron de texto para reindexar solo
+        # esas en el store semántico al final (evita reindexar páginas
+        # intactas y mantiene la búsqueda BM25/E5 sincronizada con el XML).
+        modified_pages = []
         for page in pages:
             key = f'text_page_{page.id}'
             if key in request.POST:
-                page.text = request.POST[key]
+                new_text = request.POST[key]
+                if new_text != page.text:
+                    page.text = new_text
+                    modified_pages.append(page)
 
         if meta_form.is_valid():
             updated_doc = meta_form.save(commit=False)
@@ -353,6 +356,24 @@ def edit_document(request, doc_id):
         else:
             if not nav_page:
                 messages.error(request, 'Corrige los errores de los metadatos.')
+
+        # Reindexar las páginas modificadas en el store semántico. Se hace
+        # después de guardar el texto (set_text ya escribió al XML que
+        # index_page lee vía page.get_text()). Una sola llamada save por
+        # página es aceptable porque el flujo de edición no es masivo.
+        # Errores aquí son no-críticos: el texto queda guardado aunque
+        # falle la reindexación; el siguiente reindex_all corrige.
+        if modified_pages:
+            try:
+                from apps.search.indexer import index_page  # noqa: PLC0415
+                for p in modified_pages:
+                    index_page(p)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Error reindexando páginas editadas del doc %s "
+                    "(no crítico, el texto está guardado).", doc_id,
+                )
 
         target = nav_page if nav_page else request.GET.get('page', 1)
         base_url = reverse('edit_document', args=[doc_id])

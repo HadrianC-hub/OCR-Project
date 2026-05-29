@@ -2,11 +2,9 @@ import numpy as np
 import cv2
 from scipy.ndimage import uniform_filter
 
-
 DEFAULT_WINDOW = 51
 DEFAULT_K      = 0.18
 DEFAULT_R      = 128.0  # rango dinámico fijo para imágenes 8-bit
-
 
 def sauvola(
     img_gray:         np.ndarray,
@@ -67,7 +65,6 @@ def sauvola(
 
     return binary
 
-
 def auto_tune_sauvola_k(
     gray: np.ndarray,
     window: int,
@@ -94,7 +91,6 @@ def auto_tune_sauvola_k(
 
     return float(np.clip(k, 0.12, 0.30))
 
-
 def enhance_contrast(
     gray:       np.ndarray,
     clip_limit: float = 2.5,
@@ -103,7 +99,6 @@ def enhance_contrast(
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(tile_size, tile_size))
     return clahe.apply(gray)
 
-
 def bilateral_denoise(
     gray:        np.ndarray,
     diameter:    int   = 9,
@@ -111,7 +106,6 @@ def bilateral_denoise(
     sigma_space: float = 75.0,
 ) -> np.ndarray:
     return cv2.bilateralFilter(gray, diameter, sigma_color, sigma_space)
-
 
 def normalize_illumination(
     gray:        np.ndarray,
@@ -129,7 +123,6 @@ def normalize_illumination(
     bg_f       = np.maximum(background.astype(np.float32), 1.0)
     normalized = np.clip(gray.astype(np.float32) / bg_f * 255.0, 0, 255).astype(np.uint8)
     return normalized
-
 
 def _background_uniformity(gray: np.ndarray) -> float:
     """
@@ -159,7 +152,6 @@ def _background_uniformity(gray: np.ndarray) -> float:
             if tile.size:
                 bg_samples.append(float(np.percentile(tile, 90)))
     return float(np.std(bg_samples))
-
 
 def binarize(
     img:              np.ndarray,
@@ -192,14 +184,6 @@ def binarize(
                     iluminación variable, pero engorda trazos un 15-25%
                     sobre el grosor natural por su propia formulación)
 
-    Justificación del default 'auto': Sauvola es la opción "segura" pero
-    produce binarios consistentemente más gruesos que Otsu en escaneos con
-    fondo uniforme — su umbral local mean*(1 + k*(std/r - 1)) queda por
-    encima del umbral global Otsu cuando el contraste local es alto, y eso
-    convierte píxeles del borde del trazo (semioscuros por anti-aliasing del
-    escáner) en tinta. En libros con fondo limpio eso se traduce en letras
-    "infladas" y manchadas. Otsu evita ese sesgo a costa de no adaptarse a
-    iluminación variable, así que enrutamos por uniformidad de fondo.
     """
 
     if img.ndim == 3:
@@ -251,7 +235,6 @@ def binarize(
 
     return binary
 
-
 def clean_binary(
     binary:      np.ndarray,
     morph_open:  int = 0,
@@ -265,7 +248,6 @@ def clean_binary(
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_close, morph_close))
         result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel)
     return result
-
 
 def filter_small_components(
     binary:        np.ndarray,
@@ -283,7 +265,6 @@ def filter_small_components(
             result[labels == label_id] = 0
     return result
 
-
 def _noise_gap_threshold(areas: np.ndarray) -> int:
     GAP_RATIO       = 2.5
     MAX_NOISE_AREA  = 50
@@ -300,7 +281,6 @@ def _noise_gap_threshold(areas: np.ndarray) -> int:
             if noise_count >= MIN_NOISE_COUNT:
                 return a0
     return 0
-
 
 def adaptive_filter_components(
     binary:        np.ndarray,
@@ -327,7 +307,6 @@ def adaptive_filter_components(
         result[labels == label_id] = 0
 
     return result
-
 
 def mask_binding_strips(
     binary:        np.ndarray,
@@ -417,7 +396,6 @@ def mask_binding_strips(
         out[:, x_right_safe:] = 255
 
     return out, x_left_safe, x_right_safe
-
 
 def trim_orphan_components(
     strip_binary: np.ndarray,

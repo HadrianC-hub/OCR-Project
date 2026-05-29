@@ -107,6 +107,18 @@ def delete_user(request, user_id):
 
     if request.method == 'POST':
         username = target.username
+        # Soft-delete: mantenemos la fila para preservar la integridad
+        # del histórico (OperationLog y Document apuntan a este usuario
+        # con on_delete=SET_NULL, así que un hard-delete vaciaría los
+        # registros de autoría). Pero renombramos el username con un
+        # sufijo único antes de desactivar, así el slot del nombre original
+        # queda libre y un admin puede crear más tarde un usuario nuevo
+        # con el mismo nombre (caso real cuando alguien se reincorpora
+        # con un alias distinto, o cuando el nombre era genérico tipo
+        # "biblioteca" o "becario"). El sufijo __deleted__<timestamp>
+        # también sirve como marcador legible en el admin de Django.
+        import time
+        target.username = f"{username}__deleted__{int(time.time())}"
         target.is_active = False
         target.save()
         _log(request.user, 'remove_user',

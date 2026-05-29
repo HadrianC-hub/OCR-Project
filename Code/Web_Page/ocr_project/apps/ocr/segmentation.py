@@ -132,10 +132,6 @@ def generate_segmentation_image(
 
     Devuelve la ruta del JPG generado, o None si falló.
 
-    NOTA: este punto de entrada solo se usa para PRINTED. Para
-    manuscritos pre-generamos desde el thread OCR usando
-    `from_manuscript_detection()` o `from_pipeline_result()` para evitar
-    correr el pipeline dos veces (request handler + OCR thread).
     """
     import cv2
     import numpy as np

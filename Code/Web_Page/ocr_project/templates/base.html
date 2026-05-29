@@ -16,7 +16,6 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════  NAVBAR  ═══════════════════════════════ -->
 <nav class="navbar navbar-expand-md bg-body-tertiary border-bottom shadow-sm sticky-top" id="main-navbar">
   <div class="container-fluid px-3">
 
@@ -102,7 +101,6 @@
   </div>
 </nav>
 
-<!-- ═══════════════════════════  MESSAGES  ══════════════════════════════ -->
 {% if messages %}
 <div class="container-fluid px-3 mt-2" id="flash-messages">
   {% for msg in messages %}
@@ -114,12 +112,10 @@
 </div>
 {% endif %}
 
-<!-- ═══════════════════════════  CONTENT  ═══════════════════════════════ -->
 <main class="{% block main_class %}container py-4{% endblock %}">
   {% block content %}{% endblock %}
 </main>
 
-<!-- ═══════════════════════════  FOOTER  ════════════════════════════════ -->
 <footer class="border-top mt-auto py-3 bg-body-tertiary">
   <div class="container text-center small text-muted">
     ArchivoOCR &copy; {% now "Y" %} — Sistema de gestión y digitalización documental

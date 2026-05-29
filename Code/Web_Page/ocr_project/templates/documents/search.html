@@ -23,7 +23,6 @@
         <button class="btn btn-primary px-4" type="submit">Buscar</button>
       </div>
 
-      {# Toggle de modo: metadatos (instantáneo) vs contenido (semántico) #}
       <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Modo de búsqueda">
         <input type="radio" class="btn-check" name="mode" id="mode-metadata"
                value="metadata" autocomplete="off"
@@ -42,7 +41,6 @@
         </label>
       </div>
 
-      {# Preservar filtros al cambiar modo #}
       <input type="hidden" name="document_type" value="{{ request.GET.document_type }}">
       <input type="hidden" name="author"        value="{{ request.GET.author }}">
       <input type="hidden" name="year_from"     value="{{ request.GET.year_from }}">
@@ -140,7 +138,6 @@
                     <p class="text-muted small mb-0">{{ doc.description|truncatechars:160 }}</p>
                   {% endif %}
 
-                  {# Si la búsqueda fue por contenido, mostramos las páginas con su mejor snippet #}
                   {% if mode == 'content' %}
                     {% with hits=page_hits|get_item:doc.id %}
                       {% if hits %}

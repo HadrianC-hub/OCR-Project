@@ -170,27 +170,12 @@ def document_ocr_status(request, doc_id):
 @worker_required
 @require_GET
 def line_segmentation_image(request, page_id):
-    """
-    Devuelve el JPG cacheado con las cajas de líneas/bloques dibujadas
-    sobre el facsimilar deskewed.
+    """Devuelve el JPG con las cajas de segmentación de líneas y bloques.
 
-    Comportamiento clave:
-      · Si la cache existe → la devuelve (rápido).
-      · Si NO existe y la página está siendo procesada por el thread OCR:
-        devuelve 503 + Retry-After. Justificación: el thread OCR ya está
-        ejecutando el pipeline sobre esta misma imagen como parte del
-        OCR; cuando termine, pre-cacheará la viz (ver `tasks.py`).
-        Bloquear el request handler para correr OTRA VEZ el pipeline
-        en paralelo causa contención de CPU brutal y "colgaba" la web
-        cuando el usuario subía un manuscrito tras otro.
-      · Si NO existe y la página NO está siendo procesada: genera
-        síncronamente como antes (caso raro: páginas ya terminadas
-        cuyo JPG fue borrado).
+    Si la página todavía está siendo procesada por el OCR y la cache aún
+    no existe, devuelve 503 + Retry-After para que el cliente reintente.
 
-    Query params:
-        ?force=1  — fuerza la regeneración aunque exista cache. Útil
-                    si el usuario quiere ver la última segmentación tras
-                    cambiar parámetros (no implementado todavía).
+    Acepta ?force=1 para forzar la regeneración aunque exista cache.
     """
     page = get_object_or_404(Page, pk=page_id)
     if not request.user.is_worker_or_above:
@@ -198,8 +183,6 @@ def line_segmentation_image(request, page_id):
 
     force = request.GET.get('force') == '1'
 
-    # Si esta página todavía no terminó su OCR, deferimos al thread:
-    # le decimos al cliente que reintente más tarde.
     if page.ocr_status in (Page.OCR_PENDING, Page.OCR_PROCESSING) and not force:
         out_path = segmentation.get_or_generate(
             page.image.path, page.document_id, page.order,
@@ -207,8 +190,6 @@ def line_segmentation_image(request, page_id):
             allow_block=False,
         )
         if out_path is None or not out_path.is_file():
-            # Aún no hay cache → 503 con Retry-After de 3 s. El polling
-            # del frontend reintentará automáticamente.
             response = HttpResponse(
                 'Segmentación pendiente; reintenta en unos segundos.',
                 status=503,
@@ -217,14 +198,11 @@ def line_segmentation_image(request, page_id):
             response['Retry-After'] = '3'
             response['Cache-Control'] = 'no-store'
             return response
-        # Cache disponible: la servimos.
         response = FileResponse(open(out_path, 'rb'),
                                 content_type='image/jpeg')
         response['Cache-Control'] = 'private, max-age=10'
         return response
 
-    # Estado done/error o force=1 → comportamiento normal (genera si
-    # no hay cache, sincrónicamente).
     out_path = segmentation.get_or_generate(
         page.image.path, page.document_id, page.order,
         force=force,
@@ -245,11 +223,9 @@ def line_segmentation_image(request, page_id):
 @worker_required
 @require_GET
 def line_segmentation_boxes(request, page_id):
-    """
-    Devuelve el JSON de cajas brutas de la última segmentación cacheada.
-    Si no existe, dispara una regeneración primero — pero RESPETANDO el
-    estado OCR de la página: si está pending/processing, no bloquea,
-    devuelve 503 con Retry-After.
+    """Devuelve el JSON de cajas de la última segmentación cacheada.
+
+    Si la página está en proceso de OCR, devuelve 503 con Retry-After.
     """
     page = get_object_or_404(Page, pk=page_id)
     if not request.user.is_worker_or_above:
@@ -257,8 +233,6 @@ def line_segmentation_boxes(request, page_id):
 
     json_path = segmentation.boxes_json_path(page.document_id, page.order)
     if not json_path.is_file():
-        # Generamos solo si la página NO está en proceso (mismo motivo
-        # que en line_segmentation_image: evitar pipeline duplicado).
         allow_block = page.ocr_status not in (Page.OCR_PENDING, Page.OCR_PROCESSING)
         out = segmentation.get_or_generate(
             page.image.path, page.document_id, page.order,

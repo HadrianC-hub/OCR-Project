@@ -37,12 +37,32 @@ logger = logging.getLogger(__name__)
 # Cadena estándar para procesar el texto OCR antes de componerlo.
 def _process_text(text: str, lang: str = "es", *,
                   hyphenate: bool = True) -> List[str]:
-    """OCR → párrafos limpios listos para componer."""
+    """OCR → párrafos limpios listos para componer (une líneas contiguas)."""
     paragraphs = typography.reflow_paragraphs(text or "")
     paragraphs = [typography.smart_typography(p, lang=lang) for p in paragraphs]
     if hyphenate:
         paragraphs = [typography.add_soft_hyphens(p, lang=lang) for p in paragraphs]
     return paragraphs
+
+
+def _process_blocks(text: str, lang: str = "es", *,
+                    hyphenate: bool = True) -> List[List[str]]:
+    """
+    OCR → bloques de líneas preservando saltos dentro del bloque.
+
+    Devuelve List[List[str]] donde cada sub-lista es un bloque separado
+    por línea en blanco.  Los saltos de línea simples se conservan como
+    líneas distintas, lo que permite renderizar correctamente verso y
+    poesía tanto en EPUB como en PDF.
+    """
+    blocks = typography.split_blocks(text or "")
+    result = []
+    for block in blocks:
+        processed = [typography.smart_typography(line, lang=lang) for line in block]
+        if hyphenate:
+            processed = [typography.add_soft_hyphens(line, lang=lang) for line in processed]
+        result.append(processed)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -135,10 +155,19 @@ def generate_epub(document, include_facsimile: bool = False):
                     f'</figure>\n'
                 )
 
-        # Texto reflujado
-        paragraphs = _process_text(page.text, hyphenate=True)
-        if paragraphs:
-            body_html = "\n".join(f"  <p>{_xml_escape(p)}</p>" for p in paragraphs)
+        # Texto reflujado preservando saltos de línea originales
+        blocks = _process_blocks(page.text, hyphenate=True)
+        if blocks:
+            body_parts = []
+            for block in blocks:
+                if len(block) == 1:
+                    # Párrafo normal: una sola línea en el bloque
+                    body_parts.append(f"  <p>{_xml_escape(block[0])}</p>")
+                else:
+                    # Bloque multilínea (verso/poesía): preservar cada línea
+                    lines_html = "<br/>\n    ".join(_xml_escape(l) for l in block)
+                    body_parts.append(f'  <p class="verse">{lines_html}</p>')
+            body_html = "\n".join(body_parts)
         else:
             body_html = '  <p class="empty"><em>(Sin texto transcrito)</em></p>'
 
@@ -268,6 +297,17 @@ p.empty {
   color: #999;
   font-style: italic;
   text-indent: 0;
+}
+
+/* Verso / poesía: sin sangría, alineado a la izquierda, sin justificar */
+p.verse {
+  text-indent: 0;
+  text-align: left;
+  hyphens: none;
+  -webkit-hyphens: none;
+  -epub-hyphens: none;
+  margin: 0 0 0.9em 0;
+  line-height: 1.6;
 }
 
 figure.facsimile {
@@ -580,6 +620,13 @@ def generate_pdf(document, include_facsimile: bool = False):
         textColor=colors.HexColor("#999"),
         firstLineIndent=0,
     )
+    # Estilo verso: sin sangría, alineado a la izquierda, sin justificar
+    verse_style = ParagraphStyle(
+        "Verse", fontName="Times-Roman",
+        fontSize=10.5, leading=14,
+        firstLineIndent=0, alignment=TA_LEFT,
+        spaceBefore=0, spaceAfter=0,
+    )
 
     # ── Construcción del story ──────────────────────────────────────────
     story = []
@@ -650,14 +697,26 @@ def generate_pdf(document, include_facsimile: bool = False):
         # 4b. Encabezado de la página-fuente
         story.append(Paragraph(f"— Página {page.order} —", page_head_style))
 
-        # 4c. Texto reflujado
-        paragraphs = _process_text(page.text, hyphenate=True)
-        if not paragraphs:
+        # 4c. Texto preservando estructura de líneas originales
+        blocks = _process_blocks(page.text, hyphenate=True)
+        if not blocks:
             story.append(Paragraph("(Sin texto transcrito)", empty_page_style))
         else:
-            for j, p in enumerate(paragraphs):
-                style = body_first_style if j == 0 else body_style
-                story.append(Paragraph(_pdf_escape(p), style))
+            first_block = True
+            for block in blocks:
+                if len(block) == 1:
+                    # Párrafo de una sola línea: estilo normal con sangría
+                    style = body_first_style if first_block else body_style
+                    story.append(Paragraph(_pdf_escape(block[0]), style))
+                else:
+                    # Bloque multilínea (verso/poesía): una línea por Paragraph
+                    # con estilo sin sangría y sin justificar
+                    for k, line in enumerate(block):
+                        # Primera línea del bloque: sin sangría siempre
+                        story.append(Paragraph(_pdf_escape(line), verse_style))
+                    # Espacio extra entre estrofas/bloques multilínea
+                    story.append(Spacer(1, 4))
+                first_block = False
 
     # 5. COLOFÓN --------------------------------------------------------
     story.append(NextPageTemplate("Front"))
