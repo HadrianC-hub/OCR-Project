@@ -1,0 +1,17 @@
+[0] Config.pm:307> INFO - This is Biber 2.19
+[0] Config.pm:310> INFO - Logfile is 'Thesis.blg'
+[205] biber-MSWIN64:340> INFO - === 
+[265] Biber.pm:419> INFO - Reading 'Thesis.bcf'
+[481] Biber.pm:979> INFO - Found 61 citekeys in bib section 0
+[507] Biber.pm:4419> INFO - Processing section 0
+[531] Biber.pm:4610> INFO - Looking for bibtex file 'Bibliography.bib' for section 0
+[588] bibtex.pm:1713> INFO - LaTeX decoding ...
+[702] bibtex.pm:1519> INFO - Found BibTeX data source 'Bibliography.bib'
+[1347] UCollate.pm:68> INFO - Overriding locale 'es-ES' defaults 'variable = shifted' with 'variable = non-ignorable'
+[1347] UCollate.pm:68> INFO - Overriding locale 'es-ES' defaults 'normalization = NFD' with 'normalization = prenormalized'
+[1347] Biber.pm:4239> INFO - Sorting list 'none/global//global/global' of type 'entry' with template 'none' and locale 'es-ES'
+[1433] bbl.pm:660> INFO - Writing 'Thesis.bbl' with encoding 'UTF-8'
+[1499] bbl.pm:763> INFO - Output to Thesis.bbl
+[1499] Biber.pm:131> WARN - ISBN '978-3-540-42988-1' in entry 'soille2003morphology' is invalid - run biber with '--validate_datamodel' for details.
+[1499] Biber.pm:131> WARN - ISBN '978-0-13-196741-7' in entry 'codd1972normalization' is invalid - run biber with '--validate_datamodel' for details.
+[1500] Biber.pm:133> INFO - WARNINGS: 2

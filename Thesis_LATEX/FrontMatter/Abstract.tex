@@ -1,0 +1,19 @@
+\begin{resumen}
+	Las instituciones culturales acumulan acervos documentales impresos sin transcripción digital, lo que impide su consulta, indexación y análisis computacional. El Instituto Cubano de Investigación Cultural Juan Marinello es un caso representativo: gran parte de su archivo está en español impreso o mecanografiado sin contraparte digital. El español carece de los recursos técnicos para reconocimiento óptico de caracteres disponibles en inglés, y presenta signos tipográficos propios que exigen tratamiento específico.
+	
+	Este trabajo desarrolla un sistema completo de digitalización documental con cuatro componentes. Un generador produce los datos de entrenamiento desde obras del dominio público y equilibra la distribución de frecuencias de caracteres del idioma. Un \textit{pipeline} convierte cada página digitalizada en líneas listas para el reconocimiento mediante binarización adaptativa, corrección de inclinación y segmentación. Un modelo de reconocimiento transcribe las líneas con apoyo de un modelo de lenguaje en español. Una aplicación web articula los tres anteriores en una herramienta con roles diferenciados, editor colaborativo sobre el facsimilar y exportación a formatos estándar.
+	
+	La evaluación combina partición de entrenamiento y validación, validación cruzada estratificada por fuente tipográfica, el experimento \textit{Leave-One-Font-Out}, intervalos de confianza al 95\,\% por \textit{bootstrap} y una medición final sobre un conjunto de prueba independiente. El sistema entrega un flujo de digitalización que el personal del centro Juan Marinello opera sin requisitos técnicos previos, con un reconocimiento competitivo respecto a los motores OCR de referencia para español impreso.
+	
+	\textbf{Palabras clave:} OCR, digitalización documental, patrimonio cultural, español, \textit{corpus} sintético, aplicación web.
+\end{resumen}
+
+\begin{abstract}
+	Cultural institutions accumulate printed document archives that lack digital transcriptions, which prevents their consultation, indexing, and computational analysis. The Cuban Institute of Cultural Research Juan Marinello is a representative case: much of its archive consists of printed or typewritten Spanish without a digital counterpart. Spanish lacks the technical resources for optical character recognition available in English, and presents distinctive typographic signs that demand specific treatment.
+	
+	This work develops a complete document digitisation system with four components. A generator produces the training data from public-domain works and balances the character frequency distribution of the language. A pipeline turns each digitised page into recognition-ready lines through adaptive binarisation, skew correction, and segmentation. A recognition model transcribes the lines with the support of a Spanish language model. A web application brings the previous three components together into a tool with differentiated roles, a collaborative editor over the facsimile, and export to standard formats.
+	
+	The evaluation combines training-validation partitioning, font-stratified cross-va- lidation, a Leave-One-Font-Out experiment, 95\,\% confidence intervals by bootstrap, and a final measurement on an independent test set. The system delivers a digitisation workflow that the staff of the Juan Marinello centre can operate without prior technical requirements, with recognition performance competitive with reference OCR engines for printed Spanish.
+	
+	\textbf{Keywords:} OCR, document digitisation, cultural heritage, Spanish, synthetic corpus, web application.
+\end{abstract}

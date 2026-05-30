@@ -1,0 +1,262 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\@writefile{toc}{\contentsline {chapter}{\numberline {4}Diseño, entrenamiento y evaluación del modelo de reconocimiento}{43}{chapter.4}\protected@file@percent }
+\@writefile{lof}{\addvspace {10\p@ }}
+\@writefile{lot}{\addvspace {10\p@ }}
+\@writefile{loa}{\addvspace {10\p@ }}
+\newlabel{chap:modelo}{{4}{43}{Diseño, entrenamiento y evaluación del modelo de reconocimiento}{chapter.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.1}Arquitectura CRNN+CTC}{43}{section.4.1}\protected@file@percent }
+\newlabel{sec:arquitectura}{{4.1}{43}{Arquitectura CRNN+CTC}{section.4.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.1}{\ignorespaces Diagrama del modelo CRNN+CTC para reconocimiento de líneas impresas. Cada caja representa una capa del modelo y la etiqueta amarilla a la derecha indica la forma del tensor a su salida. Las tres etiquetas verticales identifican los tres bloques funcionales: el extractor convolucional (cinco bloques CNN), el codificador secuencial (dos capas BiLSTM apiladas) y el cabezal de clasificación (capas densas seguidas de \textit  {log-softmax} y decodificación CTC). El factor de reducción horizontal acumulado de la CNN es cuatro, por lo que el número de posiciones temporales que el modelo produce es la cuarta parte del ancho de la imagen de entrada en píxeles.}}{44}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:crnn-arquitectura}{{4.1}{44}{Diagrama del modelo CRNN+CTC para reconocimiento de líneas impresas. Cada caja representa una capa del modelo y la etiqueta amarilla a la derecha indica la forma del tensor a su salida. Las tres etiquetas verticales identifican los tres bloques funcionales: el extractor convolucional (cinco bloques CNN), el codificador secuencial (dos capas BiLSTM apiladas) y el cabezal de clasificación (capas densas seguidas de \textit {log-softmax} y decodificación CTC). El factor de reducción horizontal acumulado de la CNN es cuatro, por lo que el número de posiciones temporales que el modelo produce es la cuarta parte del ancho de la imagen de entrada en píxeles}{figure.caption.16}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.1}Extractor convolucional}{45}{subsection.4.1.1}\protected@file@percent }
+\newlabel{subsec:cnn-extractor}{{4.1.1}{45}{Extractor convolucional}{subsection.4.1.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.1}{\ignorespaces Configuración de los cinco bloques convolucionales del extractor. La columna \emph  {Pooling} indica la reducción $(H \times W)$ que la operación aplica.}}{45}{table.4.1}\protected@file@percent }
+\newlabel{tab:bloques-cnn}{{4.1}{45}{Configuración de los cinco bloques convolucionales del extractor. La columna \emph {Pooling} indica la reducción $(H \times W)$ que la operación aplica}{table.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.2}Codificador recurrente bidireccional}{45}{subsection.4.1.2}\protected@file@percent }
+\newlabel{subsec:rnn-secuencial}{{4.1.2}{45}{Codificador recurrente bidireccional}{subsection.4.1.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.3}Función de pérdida CTC y \textit  {token blank}}{46}{subsection.4.1.3}\protected@file@percent }
+\newlabel{subsec:ctc-loss}{{4.1.3}{46}{Función de pérdida CTC y \textit {token blank}}{subsection.4.1.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.4}\textit  {Stride} horizontal y restricción de longitud}{47}{subsection.4.1.4}\protected@file@percent }
+\newlabel{subsec:stride-restriccion}{{4.1.4}{47}{\textit {Stride} horizontal y restricción de longitud}{subsection.4.1.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.2}Implementación del modelo}{47}{section.4.2}\protected@file@percent }
+\newlabel{sec:implementacion-modelo}{{4.2}{47}{Implementación del modelo}{section.4.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.2}{\ignorespaces Parámetros estructurales del modelo CRNN+CTC.}}{48}{table.4.2}\protected@file@percent }
+\newlabel{tab:hiperparams-modelo}{{4.2}{48}{Parámetros estructurales del modelo CRNN+CTC}{table.4.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.3}Protocolo de entrenamiento}{48}{section.4.3}\protected@file@percent }
+\newlabel{sec:protocolo-entrenamiento}{{4.3}{48}{Protocolo de entrenamiento}{section.4.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3.1}Hiperparámetros}{49}{subsection.4.3.1}\protected@file@percent }
+\newlabel{subsec:hiperparametros}{{4.3.1}{49}{Hiperparámetros}{subsection.4.3.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.3}{\ignorespaces Hiperparámetros del protocolo de entrenamiento principal.}}{49}{table.4.3}\protected@file@percent }
+\newlabel{tab:hiperparams-entrenamiento}{{4.3}{49}{Hiperparámetros del protocolo de entrenamiento principal}{table.4.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3.2}Agrupación por anchos para optimizar el uso de memoria de GPU}{50}{subsection.4.3.2}\protected@file@percent }
+\newlabel{subsec:bucketing}{{4.3.2}{50}{Agrupación por anchos para optimizar el uso de memoria de GPU}{subsection.4.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3.3}Augmentación de datos durante el entrenamiento}{50}{subsection.4.3.3}\protected@file@percent }
+\newlabel{subsec:augmentacion-entrenamiento}{{4.3.3}{50}{Augmentación de datos durante el entrenamiento}{subsection.4.3.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.4}Decodificación durante la inferencia}{50}{section.4.4}\protected@file@percent }
+\newlabel{sec:decodificacion}{{4.4}{50}{Decodificación durante la inferencia}{section.4.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.4}{\ignorespaces Transformaciones de augmentación que el cargador aplica en línea durante el entrenamiento. El cargador aplica las dos etapas de forma independiente sobre cada muestra; el conjunto de validación recibe las imágenes sin augmentación.}}{51}{table.4.4}\protected@file@percent }
+\newlabel{tab:augmentacion}{{4.4}{51}{Transformaciones de augmentación que el cargador aplica en línea durante el entrenamiento. El cargador aplica las dos etapas de forma independiente sobre cada muestra; el conjunto de validación recibe las imágenes sin augmentación}{table.4.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.1}Decodificación \textit  {greedy}}{52}{subsection.4.4.1}\protected@file@percent }
+\newlabel{subsec:greedy}{{4.4.1}{52}{Decodificación \textit {greedy}}{subsection.4.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.2}Búsqueda en haz}{52}{subsection.4.4.2}\protected@file@percent }
+\newlabel{subsec:beam-search}{{4.4.2}{52}{Búsqueda en haz}{subsection.4.4.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.3}Comparación empírica sobre validación sintética}{52}{subsection.4.4.3}\protected@file@percent }
+\newlabel{subsec:greedy-vs-beam}{{4.4.3}{52}{Comparación empírica sobre validación sintética}{subsection.4.4.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.5}{\ignorespaces Comparación de decodificación \textit  {greedy} y búsqueda en haz pura sobre el conjunto de validación del modelo final. Ambas estrategias operan sin información lingüística externa.}}{53}{table.4.5}\protected@file@percent }
+\newlabel{tab:greedy-vs-beam}{{4.5}{53}{Comparación de decodificación \textit {greedy} y búsqueda en haz pura sobre el conjunto de validación del modelo final. Ambas estrategias operan sin información lingüística externa}{table.4.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.4}Integración posterior de un modelo de lenguaje en producción}{53}{subsection.4.4.4}\protected@file@percent }
+\newlabel{subsec:lm-posterior}{{4.4.4}{53}{Integración posterior de un modelo de lenguaje en producción}{subsection.4.4.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.2}{\ignorespaces Comparación cualitativa entre \textit  {greedy} y \textit  {beam}+LM sobre líneas reales.}}{55}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:kenlm-cualitativo}{{4.2}{55}{Comparación cualitativa entre \textit {greedy} y \textit {beam}+LM sobre líneas reales}{figure.caption.17}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.5}Protocolo de evaluación estadística}{56}{section.4.5}\protected@file@percent }
+\newlabel{sec:evaluacion-estadistica}{{4.5}{56}{Protocolo de evaluación estadística}{section.4.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.1}Intervalos de confianza por \textit  {bootstrap}}{56}{subsection.4.5.1}\protected@file@percent }
+\newlabel{subsec:bootstrap}{{4.5.1}{56}{Intervalos de confianza por \textit {bootstrap}}{subsection.4.5.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.2}Pruebas no paramétricas para comparación entre configuraciones}{57}{subsection.4.5.2}\protected@file@percent }
+\newlabel{subsec:tests}{{4.5.2}{57}{Pruebas no paramétricas para comparación entre configuraciones}{subsection.4.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.3}Validación cruzada y experimento \textit  {Leave-One-Font-Out}}{57}{subsection.4.5.3}\protected@file@percent }
+\newlabel{subsec:cv-lofo}{{4.5.3}{57}{Validación cruzada y experimento \textit {Leave-One-Font-Out}}{subsection.4.5.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.6}{\ignorespaces Pruebas estadísticas que el protocolo emplea. Todas son no paramétricas y no asumen normalidad de los errores.}}{58}{table.4.6}\protected@file@percent }
+\newlabel{tab:tests-estadisticos}{{4.6}{58}{Pruebas estadísticas que el protocolo emplea. Todas son no paramétricas y no asumen normalidad de los errores}{table.4.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.6}Resultados experimentales del entrenamiento principal}{58}{section.4.6}\protected@file@percent }
+\newlabel{sec:resultados-entrenamiento}{{4.6}{58}{Resultados experimentales del entrenamiento principal}{section.4.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.3}{\ignorespaces Trayectoria de las tres métricas de error sobre el conjunto de validación sintética con decodificación \textit  {greedy}, a lo largo de las treinta épocas del entrenamiento principal: CER (error por carácter, en naranja), WER (error por palabra, en azul) y la tasa de error por línea, que resulta de restar la exactitud por línea a uno (en morado). Los tres ejes son escalas logarítmicas para que la caída inicial de tres órdenes de magnitud y el régimen estacionario posterior sean ambos legibles. El marcador verde señala la época veintitrés, donde el CER alcanza su valor mínimo de 0,0099 y de la cual procede el \textit  {checkpoint} que producción emplea. La trayectoria conjunta de las tres métricas en el mismo eje permite contrastar la velocidad relativa de mejora de cada nivel de granularidad: el error por carácter cae más rápido y se estabiliza antes que el error por palabra, y este a su vez antes que el error por línea, lo que refleja la naturaleza multiplicativa de los errores a lo largo de una secuencia.}}{59}{figure.caption.18}\protected@file@percent }
+\newlabel{fig:curvas-entrenamiento}{{4.3}{59}{Trayectoria de las tres métricas de error sobre el conjunto de validación sintética con decodificación \textit {greedy}, a lo largo de las treinta épocas del entrenamiento principal: CER (error por carácter, en naranja), WER (error por palabra, en azul) y la tasa de error por línea, que resulta de restar la exactitud por línea a uno (en morado). Los tres ejes son escalas logarítmicas para que la caída inicial de tres órdenes de magnitud y el régimen estacionario posterior sean ambos legibles. El marcador verde señala la época veintitrés, donde el CER alcanza su valor mínimo de 0,0099 y de la cual procede el \textit {checkpoint} que producción emplea. La trayectoria conjunta de las tres métricas en el mismo eje permite contrastar la velocidad relativa de mejora de cada nivel de granularidad: el error por carácter cae más rápido y se estabiliza antes que el error por palabra, y este a su vez antes que el error por línea, lo que refleja la naturaleza multiplicativa de los errores a lo largo de una secuencia}{figure.caption.18}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.4}{\ignorespaces Trayectoria de la pérdida CTC y del programador de tasa de aprendizaje a lo largo de las treinta épocas del entrenamiento principal. El panel superior reporta la pérdida de validación (línea roja con marcadores cuadrados), la media por época de la pérdida de entrenamiento (línea azul oscura con marcadores circulares) y la pérdida de entrenamiento por lote, muestreada cada cien lotes y representada en transparencia para no ocultar las medias. El panel inferior reporta la tasa de aprendizaje que el programador \textit  {OneCycleLR} aplica a lo largo del entrenamiento. Los dos ejes verticales emplean escala logarítmica.}}{60}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:curvas-loss-lr}{{4.4}{60}{Trayectoria de la pérdida CTC y del programador de tasa de aprendizaje a lo largo de las treinta épocas del entrenamiento principal. El panel superior reporta la pérdida de validación (línea roja con marcadores cuadrados), la media por época de la pérdida de entrenamiento (línea azul oscura con marcadores circulares) y la pérdida de entrenamiento por lote, muestreada cada cien lotes y representada en transparencia para no ocultar las medias. El panel inferior reporta la tasa de aprendizaje que el programador \textit {OneCycleLR} aplica a lo largo del entrenamiento. Los dos ejes verticales emplean escala logarítmica}{figure.caption.19}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.7}{\ignorespaces Resultados del entrenamiento principal sobre el conjunto de validación. La columna \emph  {Std} reporta la desviación típica de la métrica por muestra; el procedimiento \textit  {bootstrap} con diez mil remuestreos produce los intervalos de confianza al 95\,\%. La marcada asimetría de las distribuciones por muestra explica que la \emph  {Std} alcance un orden de magnitud comparable o superior al de la media, ya que el modelo transcribe la mayoría de las líneas sin errores y un pequeño grupo concentra todos los errores. Esta asimetría justifica el recurso a tests no paramétricos.}}{61}{table.4.7}\protected@file@percent }
+\newlabel{tab:resultados-principal}{{4.7}{61}{Resultados del entrenamiento principal sobre el conjunto de validación. La columna \emph {Std} reporta la desviación típica de la métrica por muestra; el procedimiento \textit {bootstrap} con diez mil remuestreos produce los intervalos de confianza al 95\,\%. La marcada asimetría de las distribuciones por muestra explica que la \emph {Std} alcance un orden de magnitud comparable o superior al de la media, ya que el modelo transcribe la mayoría de las líneas sin errores y un pequeño grupo concentra todos los errores. Esta asimetría justifica el recurso a tests no paramétricos}{table.4.7}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.8}{\ignorespaces CER por fuente tipográfica sobre el conjunto de validación del entrenamiento principal. La columna \emph  {Std} reporta la desviación típica del CER por muestra dentro de la fuente. Las nueve fuentes se ordenan alfabéticamente.}}{61}{table.4.8}\protected@file@percent }
+\newlabel{tab:cer-por-fuente-principal}{{4.8}{61}{CER por fuente tipográfica sobre el conjunto de validación del entrenamiento principal. La columna \emph {Std} reporta la desviación típica del CER por muestra dentro de la fuente. Las nueve fuentes se ordenan alfabéticamente}{table.4.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.5}{\ignorespaces Validación cruzada de cinco particiones estratificadas por fuente. El panel izquierdo muestra la trayectoria del CER por época sobre la partición de validación correspondiente a cada repetición, en escala logarítmica. El panel derecho muestra el CER final tras doce épocas para cada partición, con la media (línea discontinua) y el intervalo de confianza al 95\,\% de la media (banda gris).}}{62}{figure.caption.20}\protected@file@percent }
+\newlabel{fig:cv-5fold}{{4.5}{62}{Validación cruzada de cinco particiones estratificadas por fuente. El panel izquierdo muestra la trayectoria del CER por época sobre la partición de validación correspondiente a cada repetición, en escala logarítmica. El panel derecho muestra el CER final tras doce épocas para cada partición, con la media (línea discontinua) y el intervalo de confianza al 95\,\% de la media (banda gris)}{figure.caption.20}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.9}{\ignorespaces Resumen agregado del experimento de validación cruzada de cinco particiones estratificadas por fuente. La columna \emph  {Std} reporta la desviación típica entre particiones; las columnas \emph  {Mín} y \emph  {Máx} reportan el rango observado; la columna \emph  {IC 95\,\%} reporta el intervalo de confianza al 95\,\% de la media de las cinco mediciones.}}{63}{table.4.9}\protected@file@percent }
+\newlabel{tab:cv-resumen}{{4.9}{63}{Resumen agregado del experimento de validación cruzada de cinco particiones estratificadas por fuente. La columna \emph {Std} reporta la desviación típica entre particiones; las columnas \emph {Mín} y \emph {Máx} reportan el rango observado; la columna \emph {IC 95\,\%} reporta el intervalo de confianza al 95\,\% de la media de las cinco mediciones}{table.4.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.7}Adaptación mediante \textit  {fine-tuning}}{63}{section.4.7}\protected@file@percent }
+\newlabel{sec:fine-tuning}{{4.7}{63}{Adaptación mediante \textit {fine-tuning}}{section.4.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.6}{\ignorespaces Comparación del CER \textit  {in-sample} (azul) y el CER LOFO (naranja) para cada una de las nueve fuentes del \textit  {corpus} original. La línea discontinua marca el CER \textit  {in-sample} global (0,0106) y la línea punteada marca el CER LOFO promedio (0,0192). La fuente con menor degradación es CrimsonPro y la fuente con mayor degradación es CutiveMono.}}{64}{figure.caption.21}\protected@file@percent }
+\newlabel{fig:lofo-por-fuente}{{4.6}{64}{Comparación del CER \textit {in-sample} (azul) y el CER LOFO (naranja) para cada una de las nueve fuentes del \textit {corpus} original. La línea discontinua marca el CER \textit {in-sample} global (0,0106) y la línea punteada marca el CER LOFO promedio (0,0192). La fuente con menor degradación es CrimsonPro y la fuente con mayor degradación es CutiveMono}{figure.caption.21}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7.1}Análisis exploratorio del \textit  {corpus} extendido}{65}{subsection.4.7.1}\protected@file@percent }
+\newlabel{subsec:eda-extendido}{{4.7.1}{65}{Análisis exploratorio del \textit {corpus} extendido}{subsection.4.7.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.7}{\ignorespaces Análisis exploratorio del \textit  {corpus} sintético extendido para la etapa de \textit  {fine-tuning}, con 19\,995 imágenes que el generador produce a partir de las quince fuentes tipográficas (las nueve del \textit  {corpus} original más las seis que se añaden en esta etapa). El panel reúne las distribuciones de imágenes por fuente, longitudes de etiqueta, anchos, frecuencias de caracteres, cobertura del vocabulario español, cumplimiento de la restricción CTC, alturas por fuente y aspect ratio de las imágenes.}}{66}{figure.caption.22}\protected@file@percent }
+\newlabel{fig:eda-dashboard-extendido}{{4.7}{66}{Análisis exploratorio del \textit {corpus} sintético extendido para la etapa de \textit {fine-tuning}, con 19\,995 imágenes que el generador produce a partir de las quince fuentes tipográficas (las nueve del \textit {corpus} original más las seis que se añaden en esta etapa). El panel reúne las distribuciones de imágenes por fuente, longitudes de etiqueta, anchos, frecuencias de caracteres, cobertura del vocabulario español, cumplimiento de la restricción CTC, alturas por fuente y aspect ratio de las imágenes}{figure.caption.22}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7.2}Protocolo de \textit  {fine-tuning}}{67}{subsection.4.7.2}\protected@file@percent }
+\newlabel{subsec:protocolo-finetune}{{4.7.2}{67}{Protocolo de \textit {fine-tuning}}{subsection.4.7.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.10}{\ignorespaces Diferencias de configuración entre el entrenamiento principal y la etapa de \textit  {fine-tuning}.}}{67}{table.4.10}\protected@file@percent }
+\newlabel{tab:diff-finetune}{{4.10}{67}{Diferencias de configuración entre el entrenamiento principal y la etapa de \textit {fine-tuning}}{table.4.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.8}{\ignorespaces Trayectoria de las tres métricas de error sobre el conjunto de validación sintética con decodificación \textit  {greedy}, a lo largo de las veinte épocas del \textit  {fine-tuning} sobre el \textit  {corpus} extendido. El eje vertical, en escala logarítmica, comparte el rango con la figura~\ref {fig:curvas-entrenamiento} del entrenamiento principal para facilitar la comparación visual. El régimen es estacionario desde la primera época, con oscilaciones en un entorno cerrado en torno a CER 0,009, WER 0,034 y tasa de error por línea 0,17. La ausencia de tendencia descendente es esperable, ya que el \textit  {fine-tuning} parte del mejor \textit  {checkpoint} del entrenamiento principal, que el modelo no podía mejorar de forma apreciable sin un cambio de dominio o de capacidad. El marcador verde señala el mejor CER, que el modelo alcanza en la época dieciocho con valor 0,0081.}}{68}{figure.caption.23}\protected@file@percent }
+\newlabel{fig:curvas-finetuning}{{4.8}{68}{Trayectoria de las tres métricas de error sobre el conjunto de validación sintética con decodificación \textit {greedy}, a lo largo de las veinte épocas del \textit {fine-tuning} sobre el \textit {corpus} extendido. El eje vertical, en escala logarítmica, comparte el rango con la figura~\ref {fig:curvas-entrenamiento} del entrenamiento principal para facilitar la comparación visual. El régimen es estacionario desde la primera época, con oscilaciones en un entorno cerrado en torno a CER 0,009, WER 0,034 y tasa de error por línea 0,17. La ausencia de tendencia descendente es esperable, ya que el \textit {fine-tuning} parte del mejor \textit {checkpoint} del entrenamiento principal, que el modelo no podía mejorar de forma apreciable sin un cambio de dominio o de capacidad. El marcador verde señala el mejor CER, que el modelo alcanza en la época dieciocho con valor 0,0081}{figure.caption.23}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.11}{\ignorespaces Métricas globales antes y después del \textit  {fine-tuning} sobre el conjunto de validación correspondiente. La columna de variación reporta la reducción porcentual sobre el CER y el WER.}}{68}{table.4.11}\protected@file@percent }
+\newlabel{tab:comparativa-finetune}{{4.11}{68}{Métricas globales antes y después del \textit {fine-tuning} sobre el conjunto de validación correspondiente. La columna de variación reporta la reducción porcentual sobre el CER y el WER}{table.4.11}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.12}{\ignorespaces CER por fuente tipográfica tras el \textit  {fine-tuning} sobre el \textit  {corpus} extendido. La columna \emph  {Std} reporta la desviación típica del CER por muestra dentro de la fuente. Las seis fuentes que se añaden en esta etapa aparecen en negrita.}}{69}{table.4.12}\protected@file@percent }
+\newlabel{tab:cer-por-fuente-finetune}{{4.12}{69}{CER por fuente tipográfica tras el \textit {fine-tuning} sobre el \textit {corpus} extendido. La columna \emph {Std} reporta la desviación típica del CER por muestra dentro de la fuente. Las seis fuentes que se añaden en esta etapa aparecen en negrita}{table.4.12}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.8}Evaluación final sobre el conjunto de prueba}{70}{section.4.8}\protected@file@percent }
+\newlabel{sec:test-set}{{4.8}{70}{Evaluación final sobre el conjunto de prueba}{section.4.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.8.1}Composición del conjunto de prueba}{70}{subsection.4.8.1}\protected@file@percent }
+\newlabel{subsec:test-composicion}{{4.8.1}{70}{Composición del conjunto de prueba}{subsection.4.8.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.8.2}Resultados globales}{71}{subsection.4.8.2}\protected@file@percent }
+\newlabel{subsec:test-global}{{4.8.2}{71}{Resultados globales}{subsection.4.8.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.13}{\ignorespaces Resultados del modelo final sobre el conjunto de prueba independiente de 1\,995 imágenes. Decodificación \textit  {greedy} sobre el modelo posterior a la etapa de \textit  {fine-tuning}. El procedimiento \textit  {bootstrap} con diez mil remuestreos produce los intervalos de confianza al 95\,\%. La métrica BLEU-4 es una métrica agregada del conjunto y no admite intervalo de confianza por remuestreo de muestras individuales.}}{71}{table.4.13}\protected@file@percent }
+\newlabel{tab:test-global}{{4.13}{71}{Resultados del modelo final sobre el conjunto de prueba independiente de 1\,995 imágenes. Decodificación \textit {greedy} sobre el modelo posterior a la etapa de \textit {fine-tuning}. El procedimiento \textit {bootstrap} con diez mil remuestreos produce los intervalos de confianza al 95\,\%. La métrica BLEU-4 es una métrica agregada del conjunto y no admite intervalo de confianza por remuestreo de muestras individuales}{table.4.13}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.8.3}Resultados por fuente tipográfica}{72}{subsection.4.8.3}\protected@file@percent }
+\newlabel{subsec:test-por-fuente}{{4.8.3}{72}{Resultados por fuente tipográfica}{subsection.4.8.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.14}{\ignorespaces CER, desviación típica del CER por muestra, exactitud por línea e intervalo de confianza al 95\,\% sobre el CER por fuente tipográfica, sobre el conjunto de prueba de 1\,995 imágenes (133 por fuente). Decodificación \textit  {greedy} sobre el modelo final tras \textit  {fine-tuning}. Las seis fuentes en negrita son las que el \textit  {fine-tuning} añadió al \textit  {corpus} original.}}{72}{table.4.14}\protected@file@percent }
+\newlabel{tab:test-por-fuente}{{4.14}{72}{CER, desviación típica del CER por muestra, exactitud por línea e intervalo de confianza al 95\,\% sobre el CER por fuente tipográfica, sobre el conjunto de prueba de 1\,995 imágenes (133 por fuente). Decodificación \textit {greedy} sobre el modelo final tras \textit {fine-tuning}. Las seis fuentes en negrita son las que el \textit {fine-tuning} añadió al \textit {corpus} original}{table.4.14}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.8.4}Evaluación \textit  {Leave-One-Font-Out} sobre el modelo final}{73}{subsection.4.8.4}\protected@file@percent }
+\newlabel{subsec:lofo-post-ft}{{4.8.4}{73}{Evaluación \textit {Leave-One-Font-Out} sobre el modelo final}{subsection.4.8.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.15}{\ignorespaces Resultados del experimento \textit  {Leave-One-Font-Out} sobre el modelo final tras el \textit  {fine-tuning}. Cada fila corresponde a una repetición que excluye la fuente indicada del entrenamiento y la usa como conjunto de evaluación. El CER medio sobre las quince fuentes coincide en términos prácticos con el CER de validación del modelo final cuando ve todas las fuentes durante el entrenamiento.}}{74}{table.4.15}\protected@file@percent }
+\newlabel{tab:lofo-post-ft}{{4.15}{74}{Resultados del experimento \textit {Leave-One-Font-Out} sobre el modelo final tras el \textit {fine-tuning}. Cada fila corresponde a una repetición que excluye la fuente indicada del entrenamiento y la usa como conjunto de evaluación. El CER medio sobre las quince fuentes coincide en términos prácticos con el CER de validación del modelo final cuando ve todas las fuentes durante el entrenamiento}{table.4.15}{}}
+\@setckpt{MainMatter/Model}{
+\setcounter{page}{76}
+\setcounter{equation}{1}
+\setcounter{enumi}{5}
+\setcounter{enumii}{0}
+\setcounter{enumiii}{0}
+\setcounter{enumiv}{0}
+\setcounter{footnote}{0}
+\setcounter{mpfootnote}{0}
+\setcounter{part}{0}
+\setcounter{chapter}{4}
+\setcounter{section}{8}
+\setcounter{subsection}{4}
+\setcounter{subsubsection}{0}
+\setcounter{paragraph}{0}
+\setcounter{subparagraph}{0}
+\setcounter{figure}{8}
+\setcounter{table}{15}
+\setcounter{tabx@nest}{0}
+\setcounter{listtotal}{0}
+\setcounter{listcount}{0}
+\setcounter{liststart}{0}
+\setcounter{liststop}{0}
+\setcounter{citecount}{0}
+\setcounter{citetotal}{0}
+\setcounter{multicitecount}{0}
+\setcounter{multicitetotal}{0}
+\setcounter{instcount}{113}
+\setcounter{maxnames}{3}
+\setcounter{minnames}{1}
+\setcounter{maxitems}{3}
+\setcounter{minitems}{1}
+\setcounter{citecounter}{0}
+\setcounter{maxcitecounter}{0}
+\setcounter{savedcitecounter}{0}
+\setcounter{uniquelist}{0}
+\setcounter{uniquename}{0}
+\setcounter{refsection}{0}
+\setcounter{refsegment}{0}
+\setcounter{maxextratitle}{0}
+\setcounter{maxextratitleyear}{0}
+\setcounter{maxextraname}{2}
+\setcounter{maxextradate}{0}
+\setcounter{maxextraalpha}{0}
+\setcounter{abbrvpenalty}{50}
+\setcounter{highnamepenalty}{50}
+\setcounter{lownamepenalty}{25}
+\setcounter{maxparens}{3}
+\setcounter{parenlevel}{0}
+\setcounter{blx@maxsection}{0}
+\setcounter{mincomprange}{10}
+\setcounter{maxcomprange}{100000}
+\setcounter{mincompwidth}{1}
+\setcounter{afterword}{0}
+\setcounter{savedafterword}{0}
+\setcounter{annotator}{0}
+\setcounter{savedannotator}{0}
+\setcounter{author}{0}
+\setcounter{savedauthor}{0}
+\setcounter{bookauthor}{0}
+\setcounter{savedbookauthor}{0}
+\setcounter{commentator}{0}
+\setcounter{savedcommentator}{0}
+\setcounter{editor}{0}
+\setcounter{savededitor}{0}
+\setcounter{editora}{0}
+\setcounter{savededitora}{0}
+\setcounter{editorb}{0}
+\setcounter{savededitorb}{0}
+\setcounter{editorc}{0}
+\setcounter{savededitorc}{0}
+\setcounter{foreword}{0}
+\setcounter{savedforeword}{0}
+\setcounter{holder}{0}
+\setcounter{savedholder}{0}
+\setcounter{introduction}{0}
+\setcounter{savedintroduction}{0}
+\setcounter{namea}{0}
+\setcounter{savednamea}{0}
+\setcounter{nameb}{0}
+\setcounter{savednameb}{0}
+\setcounter{namec}{0}
+\setcounter{savednamec}{0}
+\setcounter{translator}{0}
+\setcounter{savedtranslator}{0}
+\setcounter{shortauthor}{0}
+\setcounter{savedshortauthor}{0}
+\setcounter{shorteditor}{0}
+\setcounter{savedshorteditor}{0}
+\setcounter{labelname}{0}
+\setcounter{savedlabelname}{0}
+\setcounter{institution}{0}
+\setcounter{savedinstitution}{0}
+\setcounter{lista}{0}
+\setcounter{savedlista}{0}
+\setcounter{listb}{0}
+\setcounter{savedlistb}{0}
+\setcounter{listc}{0}
+\setcounter{savedlistc}{0}
+\setcounter{listd}{0}
+\setcounter{savedlistd}{0}
+\setcounter{liste}{0}
+\setcounter{savedliste}{0}
+\setcounter{listf}{0}
+\setcounter{savedlistf}{0}
+\setcounter{location}{0}
+\setcounter{savedlocation}{0}
+\setcounter{organization}{0}
+\setcounter{savedorganization}{0}
+\setcounter{origlocation}{0}
+\setcounter{savedoriglocation}{0}
+\setcounter{origpublisher}{0}
+\setcounter{savedorigpublisher}{0}
+\setcounter{publisher}{0}
+\setcounter{savedpublisher}{0}
+\setcounter{language}{0}
+\setcounter{savedlanguage}{0}
+\setcounter{origlanguage}{0}
+\setcounter{savedoriglanguage}{0}
+\setcounter{pageref}{0}
+\setcounter{savedpageref}{0}
+\setcounter{textcitecount}{0}
+\setcounter{textcitetotal}{0}
+\setcounter{textcitemaxnames}{0}
+\setcounter{biburlbigbreakpenalty}{100}
+\setcounter{biburlbreakpenalty}{200}
+\setcounter{biburlnumpenalty}{0}
+\setcounter{biburlucpenalty}{0}
+\setcounter{biburllcpenalty}{0}
+\setcounter{smartand}{1}
+\setcounter{bbx:relatedcount}{0}
+\setcounter{bbx:relatedtotal}{0}
+\setcounter{section@level}{2}
+\setcounter{Item}{11}
+\setcounter{Hfootnote}{0}
+\setcounter{bookmark@seq@number}{75}
+\setcounter{theorem}{0}
+\setcounter{definition}{0}
+\setcounter{lemma}{0}
+\setcounter{caption@flags}{2}
+\setcounter{continuedfloat}{0}
+\setcounter{subfigure}{0}
+\setcounter{subtable}{0}
+\setcounter{AlgoLine}{0}
+\setcounter{algocfline}{0}
+\setcounter{algocfproc}{0}
+\setcounter{algocf}{0}
+\setcounter{parentequation}{0}
+\setcounter{float@type}{8}
+\setcounter{@todonotes@numberoftodonotes}{0}
+\setcounter{lstnumber}{1}
+\setcounter{lstlisting}{0}
+}

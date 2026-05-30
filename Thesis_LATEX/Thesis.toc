@@ -1,0 +1,91 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {chapter}{Introducción}{1}{chapter*.8}%
+\contentsline {chapter}{\numberline {1}Marco teórico y estado del arte}{5}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Contexto institucional: el Instituto Cubano de Investigación Cultural Juan Marinello}{5}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Reconocimiento óptico de caracteres}{6}{section.1.2}%
+\contentsline {subsection}{\numberline {1.2.1}Definición y flujo de procesamiento de un sistema OCR}{6}{subsection.1.2.1}%
+\contentsline {subsection}{\numberline {1.2.2}OCR de caracteres aislados frente a OCR de líneas completas}{9}{subsection.1.2.2}%
+\contentsline {section}{\numberline {1.3}Fundamentos de redes neuronales y aprendizaje supervisado}{9}{section.1.3}%
+\contentsline {subsection}{\numberline {1.3.1}Redes neuronales artificiales y entrenamiento}{9}{subsection.1.3.1}%
+\contentsline {subsection}{\numberline {1.3.2}Aprendizaje supervisado y conjuntos de datos}{10}{subsection.1.3.2}%
+\contentsline {subsection}{\numberline {1.3.3}Sobreajuste y generalización}{10}{subsection.1.3.3}%
+\contentsline {section}{\numberline {1.4}Propiedades estadísticas del lenguaje natural}{11}{section.1.4}%
+\contentsline {section}{\numberline {1.5}Métricas de evaluación de sistemas OCR}{11}{section.1.5}%
+\contentsline {subsection}{\numberline {1.5.1}Precisión, recall y F1}{11}{subsection.1.5.1}%
+\contentsline {subsection}{\numberline {1.5.2}Tasa de error de carácter, tasa de error de palabra y exactitud por línea}{12}{subsection.1.5.2}%
+\contentsline {section}{\numberline {1.6}Estado del arte}{13}{section.1.6}%
+\contentsline {subsection}{\numberline {1.6.1}Motores OCR clásicos: Tesseract y Calamari}{13}{subsection.1.6.1}%
+\contentsline {subsection}{\numberline {1.6.2}Arquitecturas basadas en aprendizaje profundo: CRNN + CTC}{14}{subsection.1.6.2}%
+\contentsline {subsection}{\numberline {1.6.3}Arquitecturas basadas en transformers: TrOCR y derivados}{14}{subsection.1.6.3}%
+\contentsline {subsection}{\numberline {1.6.4}Generación sintética de datos para OCR}{15}{subsection.1.6.4}%
+\contentsline {subsection}{\numberline {1.6.5}Plataformas de digitalización documental: Transkribus}{15}{subsection.1.6.5}%
+\contentsline {subsection}{\numberline {1.6.6}Trabajos previos sobre OCR para texto impreso en español}{16}{subsection.1.6.6}%
+\contentsline {section}{\numberline {1.7}Tecnologías para el desarrollo de la aplicación web}{16}{section.1.7}%
+\contentsline {subsection}{\numberline {1.7.1}Django y el patrón Modelo-Vista-Plantilla}{17}{subsection.1.7.1}%
+\contentsline {subsection}{\numberline {1.7.2}Persistencia: PostgreSQL y XML}{17}{subsection.1.7.2}%
+\contentsline {chapter}{\numberline {2}Generación del \textit {corpus} sintético}{19}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Justificación de la generación de un \textit {corpus} propio}{19}{section.2.1}%
+\contentsline {subsection}{\numberline {2.1.1}Análisis y descarte de datasets existentes para OCR en español}{19}{subsection.2.1.1}%
+\contentsline {subsection}{\numberline {2.1.2}Desbalance de clases en el contexto del español}{21}{subsection.2.1.2}%
+\contentsline {section}{\numberline {2.2}Diseño del \textit {corpus}}{21}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Estrategia de sobremuestreo: grupos A, B y C}{21}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Corpus textual: Project Gutenberg}{23}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Selección tipográfica para el \textit {corpus} de entrenamiento}{23}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}Implementación del generador}{24}{section.2.3}%
+\contentsline {subsection}{\numberline {2.3.1}Generación de cadenas balanceadas}{24}{subsection.2.3.1}%
+\contentsline {subsection}{\numberline {2.3.2}Renderizado de líneas de texto}{26}{subsection.2.3.2}%
+\contentsline {subsection}{\numberline {2.3.3}Simulación de degradación visual compatible con la binarización adaptativa}{27}{subsection.2.3.3}%
+\contentsline {section}{\numberline {2.4}Vocabulario indexado del sistema}{29}{section.2.4}%
+\contentsline {section}{\numberline {2.5}Análisis exploratorio del \textit {corpus} generado}{30}{section.2.5}%
+\contentsline {chapter}{\numberline {3}\textit {Pipeline} de preprocesamiento}{33}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Análisis de imagen y configuración automática}{33}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Binarización}{36}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Corrección de inclinación y curvatura}{37}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Detección y segmentación de bloques y líneas de texto}{38}{section.3.4}%
+\contentsline {subsection}{\numberline {3.4.1}Detección de bloques de texto}{38}{subsection.3.4.1}%
+\contentsline {subsection}{\numberline {3.4.2}Segmentación de líneas dentro de cada bloque}{39}{subsection.3.4.2}%
+\contentsline {section}{\numberline {3.5}Normalización de líneas para inferencia}{41}{section.3.5}%
+\contentsline {chapter}{\numberline {4}Diseño, entrenamiento y evaluación del modelo de reconocimiento}{43}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Arquitectura CRNN+CTC}{43}{section.4.1}%
+\contentsline {subsection}{\numberline {4.1.1}Extractor convolucional}{45}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}Codificador recurrente bidireccional}{45}{subsection.4.1.2}%
+\contentsline {subsection}{\numberline {4.1.3}Función de pérdida CTC y \textit {token blank}}{46}{subsection.4.1.3}%
+\contentsline {subsection}{\numberline {4.1.4}\textit {Stride} horizontal y restricción de longitud}{47}{subsection.4.1.4}%
+\contentsline {section}{\numberline {4.2}Implementación del modelo}{47}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Protocolo de entrenamiento}{48}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Hiperparámetros}{49}{subsection.4.3.1}%
+\contentsline {subsection}{\numberline {4.3.2}Agrupación por anchos para optimizar el uso de memoria de GPU}{50}{subsection.4.3.2}%
+\contentsline {subsection}{\numberline {4.3.3}Augmentación de datos durante el entrenamiento}{50}{subsection.4.3.3}%
+\contentsline {section}{\numberline {4.4}Decodificación durante la inferencia}{50}{section.4.4}%
+\contentsline {subsection}{\numberline {4.4.1}Decodificación \textit {greedy}}{52}{subsection.4.4.1}%
+\contentsline {subsection}{\numberline {4.4.2}Búsqueda en haz}{52}{subsection.4.4.2}%
+\contentsline {subsection}{\numberline {4.4.3}Comparación empírica sobre validación sintética}{52}{subsection.4.4.3}%
+\contentsline {subsection}{\numberline {4.4.4}Integración posterior de un modelo de lenguaje en producción}{53}{subsection.4.4.4}%
+\contentsline {section}{\numberline {4.5}Protocolo de evaluación estadística}{56}{section.4.5}%
+\contentsline {subsection}{\numberline {4.5.1}Intervalos de confianza por \textit {bootstrap}}{56}{subsection.4.5.1}%
+\contentsline {subsection}{\numberline {4.5.2}Pruebas no paramétricas para comparación entre configuraciones}{57}{subsection.4.5.2}%
+\contentsline {subsection}{\numberline {4.5.3}Validación cruzada y experimento \textit {Leave-One-Font-Out}}{57}{subsection.4.5.3}%
+\contentsline {section}{\numberline {4.6}Resultados experimentales del entrenamiento principal}{58}{section.4.6}%
+\contentsline {section}{\numberline {4.7}Adaptación mediante \textit {fine-tuning}}{63}{section.4.7}%
+\contentsline {subsection}{\numberline {4.7.1}Análisis exploratorio del \textit {corpus} extendido}{65}{subsection.4.7.1}%
+\contentsline {subsection}{\numberline {4.7.2}Protocolo de \textit {fine-tuning}}{67}{subsection.4.7.2}%
+\contentsline {section}{\numberline {4.8}Evaluación final sobre el conjunto de prueba}{70}{section.4.8}%
+\contentsline {subsection}{\numberline {4.8.1}Composición del conjunto de prueba}{70}{subsection.4.8.1}%
+\contentsline {subsection}{\numberline {4.8.2}Resultados globales}{71}{subsection.4.8.2}%
+\contentsline {subsection}{\numberline {4.8.3}Resultados por fuente tipográfica}{72}{subsection.4.8.3}%
+\contentsline {subsection}{\numberline {4.8.4}Evaluación \textit {Leave-One-Font-Out} sobre el modelo final}{73}{subsection.4.8.4}%
+\contentsline {chapter}{\numberline {5}Aplicación web para la gestión documental}{76}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Arquitectura general y pila tecnológica}{76}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Modelo de datos}{77}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Documentos y páginas}{80}{subsection.5.2.1}%
+\contentsline {subsection}{\numberline {5.2.2}Registro de operaciones y métricas de uso}{82}{subsection.5.2.2}%
+\contentsline {section}{\numberline {5.3}Roles de usuario y control de acceso}{82}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Flujo de digitalización}{83}{section.5.4}%
+\contentsline {section}{\numberline {5.5}Integración del modelo de reconocimiento}{86}{section.5.5}%
+\contentsline {section}{\numberline {5.6}Editor de revisión de transcripciones}{88}{section.5.6}%
+\contentsline {section}{\numberline {5.7}Formato XML y exportación a estándares}{90}{section.5.7}%
+\contentsline {subsection}{\numberline {5.7.1}Estructura del fichero}{91}{subsection.5.7.1}%
+\contentsline {subsection}{\numberline {5.7.2}Decisiones de diseño}{92}{subsection.5.7.2}%
+\contentsline {chapter}{Conclusiones}{93}{chapter*.31}%
+\contentsline {chapter}{Recomendaciones}{97}{chapter*.32}%
+\contentsline {chapter}{Referencias bibliográficas}{99}{chapter*.33}%

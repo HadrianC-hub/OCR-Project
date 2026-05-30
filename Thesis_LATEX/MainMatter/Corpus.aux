@@ -1,0 +1,195 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\@writefile{toc}{\contentsline {chapter}{\numberline {2}Generación del \textit  {corpus} sintético}{19}{chapter.2}\protected@file@percent }
+\@writefile{lof}{\addvspace {10\p@ }}
+\@writefile{lot}{\addvspace {10\p@ }}
+\@writefile{loa}{\addvspace {10\p@ }}
+\newlabel{chap:corpus}{{2}{19}{Generación del \textit {corpus} sintético}{chapter.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2.1}Justificación de la generación de un \textit  {corpus} propio}{19}{section.2.1}\protected@file@percent }
+\newlabel{sec:justificacion-corpus}{{2.1}{19}{Justificación de la generación de un \textit {corpus} propio}{section.2.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1.1}Análisis y descarte de datasets existentes para OCR en español}{19}{subsection.2.1.1}\protected@file@percent }
+\newlabel{subsec:descarte-datasets}{{2.1.1}{19}{Análisis y descarte de datasets existentes para OCR en español}{subsection.2.1.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1.2}Desbalance de clases en el contexto del español}{21}{subsection.2.1.2}\protected@file@percent }
+\newlabel{subsec:desbalance}{{2.1.2}{21}{Desbalance de clases en el contexto del español}{subsection.2.1.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2.2}Diseño del \textit  {corpus}}{21}{section.2.2}\protected@file@percent }
+\newlabel{sec:diseno-corpus}{{2.2}{21}{Diseño del \textit {corpus}}{section.2.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2.1}Estrategia de sobremuestreo: grupos A, B y C}{21}{subsection.2.2.1}\protected@file@percent }
+\newlabel{subsec:sobremuestreo}{{2.2.1}{21}{Estrategia de sobremuestreo: grupos A, B y C}{subsection.2.2.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2.1}{\ignorespaces Grupos de sobremuestreo del \textit  {corpus} sintético.}}{22}{table.2.1}\protected@file@percent }
+\newlabel{tab:grupos-sobremuestreo}{{2.1}{22}{Grupos de sobremuestreo del \textit {corpus} sintético}{table.2.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2.2}Corpus textual: Project Gutenberg}{23}{subsection.2.2.2}\protected@file@percent }
+\newlabel{subsec:gutenberg}{{2.2.2}{23}{Corpus textual: Project Gutenberg}{subsection.2.2.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2.3}Selección tipográfica para el \textit  {corpus} de entrenamiento}{23}{subsection.2.2.3}\protected@file@percent }
+\newlabel{subsec:fuentes-entrenamiento}{{2.2.3}{23}{Selección tipográfica para el \textit {corpus} de entrenamiento}{subsection.2.2.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2.2}{\ignorespaces Fuentes tipográficas del \textit  {corpus} de entrenamiento.}}{23}{table.2.2}\protected@file@percent }
+\newlabel{tab:fuentes-entrenamiento}{{2.2}{23}{Fuentes tipográficas del \textit {corpus} de entrenamiento}{table.2.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2.3}Implementación del generador}{24}{section.2.3}\protected@file@percent }
+\newlabel{sec:implementacion-generador}{{2.3}{24}{Implementación del generador}{section.2.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3.1}Generación de cadenas balanceadas}{24}{subsection.2.3.1}\protected@file@percent }
+\newlabel{subsec:cadenas-balanceadas}{{2.3.1}{24}{Generación de cadenas balanceadas}{subsection.2.3.1}{}}
+\newlabel{eq:deficit}{{2.1}{25}{Generación de cadenas balanceadas}{equation.2.3.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3.2}Renderizado de líneas de texto}{26}{subsection.2.3.2}\protected@file@percent }
+\newlabel{subsec:renderizado}{{2.3.2}{26}{Renderizado de líneas de texto}{subsection.2.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3.3}Simulación de degradación visual compatible con la binarización adaptativa}{27}{subsection.2.3.3}\protected@file@percent }
+\newlabel{subsec:degradacion}{{2.3.3}{27}{Simulación de degradación visual compatible con la binarización adaptativa}{subsection.2.3.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2.1}{\ignorespaces Etapas acumulativas de la simulación de degradación visual sobre una línea recién renderizada del \textit  {corpus} sintético, con la fuente SpecialElite. El panel~(a) muestra la imagen original tras el renderizado. El panel~(b) muestra la imagen tras la adición de ruido gaussiano con desviación típica~$\sigma $. El panel~(c) muestra la imagen tras la adición posterior de ruido sal y pimienta. El panel~(d) muestra la imagen tras el suavizado gaussiano final, que el sistema aplica al 50\,\% de las imágenes que escoge al azar. Los parámetros concretos que cada panel reporta corresponden a una realización aleatoria con los rangos que el texto describe.}}{28}{figure.caption.12}\protected@file@percent }
+\newlabel{fig:degradacion-visual}{{2.1}{28}{Etapas acumulativas de la simulación de degradación visual sobre una línea recién renderizada del \textit {corpus} sintético, con la fuente SpecialElite. El panel~(a) muestra la imagen original tras el renderizado. El panel~(b) muestra la imagen tras la adición de ruido gaussiano con desviación típica~$\sigma $. El panel~(c) muestra la imagen tras la adición posterior de ruido sal y pimienta. El panel~(d) muestra la imagen tras el suavizado gaussiano final, que el sistema aplica al 50\,\% de las imágenes que escoge al azar. Los parámetros concretos que cada panel reporta corresponden a una realización aleatoria con los rangos que el texto describe}{figure.caption.12}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2.4}Vocabulario indexado del sistema}{29}{section.2.4}\protected@file@percent }
+\newlabel{sec:vocabulario}{{2.4}{29}{Vocabulario indexado del sistema}{section.2.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2.5}Análisis exploratorio del \textit  {corpus} generado}{30}{section.2.5}\protected@file@percent }
+\newlabel{sec:eda-corpus}{{2.5}{30}{Análisis exploratorio del \textit {corpus} generado}{section.2.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2.2}{\ignorespaces Análisis exploratorio del \textit  {corpus} sintético de entrenamiento, con 19\,998 imágenes que el generador produce a partir de las nueve fuentes tipográficas seleccionadas. El panel reúne las distribuciones de imágenes por fuente, longitudes de etiqueta, anchos, frecuencias de caracteres, cobertura del vocabulario español, cumplimiento de la restricción CTC, alturas por fuente y aspect ratio de las imágenes.}}{31}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:eda-dashboard}{{2.2}{31}{Análisis exploratorio del \textit {corpus} sintético de entrenamiento, con 19\,998 imágenes que el generador produce a partir de las nueve fuentes tipográficas seleccionadas. El panel reúne las distribuciones de imágenes por fuente, longitudes de etiqueta, anchos, frecuencias de caracteres, cobertura del vocabulario español, cumplimiento de la restricción CTC, alturas por fuente y aspect ratio de las imágenes}{figure.caption.13}{}}
+\@setckpt{MainMatter/Corpus}{
+\setcounter{page}{33}
+\setcounter{equation}{1}
+\setcounter{enumi}{6}
+\setcounter{enumii}{0}
+\setcounter{enumiii}{0}
+\setcounter{enumiv}{0}
+\setcounter{footnote}{0}
+\setcounter{mpfootnote}{0}
+\setcounter{part}{0}
+\setcounter{chapter}{2}
+\setcounter{section}{5}
+\setcounter{subsection}{0}
+\setcounter{subsubsection}{0}
+\setcounter{paragraph}{0}
+\setcounter{subparagraph}{0}
+\setcounter{figure}{2}
+\setcounter{table}{2}
+\setcounter{tabx@nest}{0}
+\setcounter{listtotal}{0}
+\setcounter{listcount}{0}
+\setcounter{liststart}{0}
+\setcounter{liststop}{0}
+\setcounter{citecount}{0}
+\setcounter{citetotal}{0}
+\setcounter{multicitecount}{0}
+\setcounter{multicitetotal}{0}
+\setcounter{instcount}{71}
+\setcounter{maxnames}{3}
+\setcounter{minnames}{1}
+\setcounter{maxitems}{3}
+\setcounter{minitems}{1}
+\setcounter{citecounter}{0}
+\setcounter{maxcitecounter}{0}
+\setcounter{savedcitecounter}{0}
+\setcounter{uniquelist}{0}
+\setcounter{uniquename}{0}
+\setcounter{refsection}{0}
+\setcounter{refsegment}{0}
+\setcounter{maxextratitle}{0}
+\setcounter{maxextratitleyear}{0}
+\setcounter{maxextraname}{2}
+\setcounter{maxextradate}{0}
+\setcounter{maxextraalpha}{0}
+\setcounter{abbrvpenalty}{50}
+\setcounter{highnamepenalty}{50}
+\setcounter{lownamepenalty}{25}
+\setcounter{maxparens}{3}
+\setcounter{parenlevel}{0}
+\setcounter{blx@maxsection}{0}
+\setcounter{mincomprange}{10}
+\setcounter{maxcomprange}{100000}
+\setcounter{mincompwidth}{1}
+\setcounter{afterword}{0}
+\setcounter{savedafterword}{0}
+\setcounter{annotator}{0}
+\setcounter{savedannotator}{0}
+\setcounter{author}{0}
+\setcounter{savedauthor}{0}
+\setcounter{bookauthor}{0}
+\setcounter{savedbookauthor}{0}
+\setcounter{commentator}{0}
+\setcounter{savedcommentator}{0}
+\setcounter{editor}{0}
+\setcounter{savededitor}{0}
+\setcounter{editora}{0}
+\setcounter{savededitora}{0}
+\setcounter{editorb}{0}
+\setcounter{savededitorb}{0}
+\setcounter{editorc}{0}
+\setcounter{savededitorc}{0}
+\setcounter{foreword}{0}
+\setcounter{savedforeword}{0}
+\setcounter{holder}{0}
+\setcounter{savedholder}{0}
+\setcounter{introduction}{0}
+\setcounter{savedintroduction}{0}
+\setcounter{namea}{0}
+\setcounter{savednamea}{0}
+\setcounter{nameb}{0}
+\setcounter{savednameb}{0}
+\setcounter{namec}{0}
+\setcounter{savednamec}{0}
+\setcounter{translator}{0}
+\setcounter{savedtranslator}{0}
+\setcounter{shortauthor}{0}
+\setcounter{savedshortauthor}{0}
+\setcounter{shorteditor}{0}
+\setcounter{savedshorteditor}{0}
+\setcounter{labelname}{0}
+\setcounter{savedlabelname}{0}
+\setcounter{institution}{0}
+\setcounter{savedinstitution}{0}
+\setcounter{lista}{0}
+\setcounter{savedlista}{0}
+\setcounter{listb}{0}
+\setcounter{savedlistb}{0}
+\setcounter{listc}{0}
+\setcounter{savedlistc}{0}
+\setcounter{listd}{0}
+\setcounter{savedlistd}{0}
+\setcounter{liste}{0}
+\setcounter{savedliste}{0}
+\setcounter{listf}{0}
+\setcounter{savedlistf}{0}
+\setcounter{location}{0}
+\setcounter{savedlocation}{0}
+\setcounter{organization}{0}
+\setcounter{savedorganization}{0}
+\setcounter{origlocation}{0}
+\setcounter{savedoriglocation}{0}
+\setcounter{origpublisher}{0}
+\setcounter{savedorigpublisher}{0}
+\setcounter{publisher}{0}
+\setcounter{savedpublisher}{0}
+\setcounter{language}{0}
+\setcounter{savedlanguage}{0}
+\setcounter{origlanguage}{0}
+\setcounter{savedoriglanguage}{0}
+\setcounter{pageref}{0}
+\setcounter{savedpageref}{0}
+\setcounter{textcitecount}{0}
+\setcounter{textcitetotal}{0}
+\setcounter{textcitemaxnames}{0}
+\setcounter{biburlbigbreakpenalty}{100}
+\setcounter{biburlbreakpenalty}{200}
+\setcounter{biburlnumpenalty}{0}
+\setcounter{biburlucpenalty}{0}
+\setcounter{biburllcpenalty}{0}
+\setcounter{smartand}{1}
+\setcounter{bbx:relatedcount}{0}
+\setcounter{bbx:relatedtotal}{0}
+\setcounter{section@level}{1}
+\setcounter{Item}{6}
+\setcounter{Hfootnote}{0}
+\setcounter{bookmark@seq@number}{38}
+\setcounter{theorem}{0}
+\setcounter{definition}{0}
+\setcounter{lemma}{0}
+\setcounter{caption@flags}{2}
+\setcounter{continuedfloat}{0}
+\setcounter{subfigure}{0}
+\setcounter{subtable}{0}
+\setcounter{AlgoLine}{0}
+\setcounter{algocfline}{0}
+\setcounter{algocfproc}{0}
+\setcounter{algocf}{0}
+\setcounter{parentequation}{0}
+\setcounter{float@type}{8}
+\setcounter{@todonotes@numberoftodonotes}{0}
+\setcounter{lstnumber}{1}
+\setcounter{lstlisting}{0}
+}
